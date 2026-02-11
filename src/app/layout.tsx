@@ -1,7 +1,6 @@
-import "./globals.css";
 export const metadata = {
   title: "EIT - IT Tracking of Students",
-  description: "EIT Internal System",
+  description: "EIT Internal Management System",
 };
 
 export default function RootLayout({

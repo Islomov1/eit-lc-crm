@@ -1,0 +1,116 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  SUPPORT
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+}
+
+enum HomeworkStatus {
+  DONE
+  PARTIAL
+  NOT_DONE
+}
+
+enum ScheduleType {
+  MWF
+  TTS
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+
+  groups          Group[]          @relation("TeacherGroups")
+  reports         Report[]         @relation("TeacherReports")
+  supportSessions SupportSession[] @relation("SupportUser")
+}
+
+model Group {
+  id        String       @id @default(uuid())
+  name      String
+  schedule  ScheduleType
+  startTime String
+  endTime   String
+  createdAt DateTime     @default(now())
+
+  teacherId String?
+  teacher   User? @relation("TeacherGroups", fields: [teacherId], references: [id])
+
+  students  Student[]
+  reports   Report[]
+}
+
+model Student {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  groupId   String?
+  group     Group?  @relation(fields: [groupId], references: [id])
+
+  parents         Parent[]
+  reports         Report[]
+  supportSessions SupportSession[]
+}
+
+model Parent {
+  id         String   @id @default(uuid())
+  name       String
+  phone      String
+  telegramId String?
+  createdAt  DateTime @default(now())
+
+  studentId  String
+  student    Student @relation(fields: [studentId], references: [id])
+}
+
+model Report {
+  id         String           @id @default(uuid())
+  date       DateTime         @default(now())
+
+  attendance AttendanceStatus
+  homework   HomeworkStatus
+  comment    String?
+
+  studentId  String
+  student    Student @relation(fields: [studentId], references: [id])
+
+  teacherId  String
+  teacher    User @relation("TeacherReports", fields: [teacherId], references: [id])
+
+  groupId    String
+  group      Group @relation(fields: [groupId], references: [id])
+
+  @@unique([studentId, date])
+}
+
+model SupportSession {
+  id        String   @id @default(uuid())
+  startTime DateTime
+  endTime   DateTime
+  comment   String?
+  createdAt DateTime @default(now())
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
+
+  supportId String
+  support   User @relation("SupportUser", fields: [supportId], references: [id])
+}
