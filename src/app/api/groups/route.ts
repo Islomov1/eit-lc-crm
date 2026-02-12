@@ -19,7 +19,7 @@ export async function POST(request: Request) {
         schedule,
         startTime,
         endTime,
-        programId,
+        programId,            // ← КРИТИЧНО
         teacherId: teacherId || null,
         month: 1,
       },
