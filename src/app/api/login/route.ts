@@ -49,8 +49,8 @@ export async function POST(req: Request) {
         role: user.role,
       },
     });
-  } catch (error) {
-    console.error(error);
+  } catch {
+    console.error();
     return NextResponse.json(
       { error: "Server error" },
       { status: 500 }

@@ -7,7 +7,7 @@ export async function sendTelegramMessage(
   if (!token) return;
 
   await fetch(
-    `https://api.telegram.org/bot${token}/sendMessage`,
+    `https://api.telegram.org/bot8597414915:AAGXkC2rP9AxqdZUuJwIf4Q1BbACNKjDc4Q/sendMessage`,
     {
       method: "POST",
       headers: {

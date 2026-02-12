@@ -41,21 +41,27 @@ export default async function AdminLayout({
         </div>
 
         {/* NAVIGATION */}
-        <nav className="flex-1 px-4 space-y-2 text-sm font-medium">
+       <nav className="flex-1 px-4 space-y-2 text-sm font-medium">
 
-          <SidebarLink href="/admin">
-            Dashboard
-          </SidebarLink>
+  <SidebarLink href="/admin">
+    Dashboard
+  </SidebarLink>
+<SidebarLink href="/admin/timetable">
+  Timetable
+</SidebarLink>
+  <SidebarLink href="/admin/groups">
+    Groups
+  </SidebarLink>
 
-          <SidebarLink href="/admin/students">
-            Students
-          </SidebarLink>
+  <SidebarLink href="/admin/students">
+    Students
+  </SidebarLink>
 
-          <SidebarLink href="/admin/users">
-            Users
-          </SidebarLink>
+  <SidebarLink href="/admin/users">
+    Users
+  </SidebarLink>
 
-        </nav>
+</nav>
 
         {/* LOGOUT BUTTON */}
         <div className="p-6 mt-auto">

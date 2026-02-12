@@ -21,6 +21,7 @@ async function createStudent(formData: FormData) {
 
   revalidatePath("/admin/students");
 }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function updateReport(formData: FormData) {
   "use server";
 
@@ -123,6 +124,7 @@ async function deleteParent(formData: FormData) {
 }
 import { revalidatePath } from "next/cache";
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function deleteReport(formData: FormData) {
   "use server";
 
@@ -139,12 +141,12 @@ async function deleteReport(formData: FormData) {
 
 export default async function StudentsPage() {
   const students = await prisma.student.findMany({
-    include: {
-      group: true,
-      parents: true,
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  include: {
+    group: true,
+    parents: true, // ← ВОТ ЭТО ОБЯЗАТЕЛЬНО
+  },
+  orderBy: { createdAt: "desc" },
+});
 
   const groups = await prisma.group.findMany({
     orderBy: { name: "asc" },
@@ -254,46 +256,50 @@ export default async function StudentsPage() {
   className="bg-gray-50 p-3 rounded"
 >
   <form
-    action={updateParent}
-    className="grid grid-cols-4 gap-3 items-center"
-  >
-    <input type="hidden" name="id" value={parent.id} />
+  action={updateParent}
+  className="grid grid-cols-4 gap-3 items-center bg-gray-50 p-3 rounded"
+>
+  <input
+    type="hidden"
+    name="id"
+    value={parent.id}
+  />
 
-    <input
-      name="name"
-      defaultValue={parent.name}
-      className="border p-2 rounded"
-    />
+  <input
+    name="name"
+    defaultValue={parent.name}
+    className="border p-2 rounded"
+  />
 
-    <input
-      name="phone"
-      defaultValue={parent.phone}
-      className="border p-2 rounded"
-    />
+  <input
+    name="phone"
+    defaultValue={parent.phone}
+    className="border p-2 rounded"
+  />
 
-    <input
-      name="telegramId"
-      defaultValue={parent.telegramId || ""}
-      className="border p-2 rounded"
-    />
+  <input
+    name="telegramId"
+    defaultValue={parent.telegramId || ""}
+    className="border p-2 rounded"
+  />
 
-    <div className="col-span-4 flex justify-between">
-      <button className="text-blue-600 text-sm hover:underline">
-        Save
-      </button>
+  <div className="col-span-4 flex justify-between mt-2">
+    <button
+      type="submit"
+      className="text-blue-600 text-sm hover:underline"
+    >
+      Save
+    </button>
 
-      <form action={deleteParent}>
-        <input
-          type="hidden"
-          name="id"
-          value={parent.id}
-        />
-        <button className="text-red-500 text-sm hover:underline">
-          Delete
-        </button>
-      </form>
-    </div>
-  </form>
+    <button
+      type="submit"
+      formAction={deleteParent}
+      className="text-red-500 text-sm hover:underline"
+    >
+      Delete
+    </button>
+  </div>
+</form>
 </div>
                 ))}
               </div>

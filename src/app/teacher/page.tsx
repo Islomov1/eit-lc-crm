@@ -4,7 +4,6 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { AttendanceStatus, HomeworkStatus } from "@prisma/client";
 import { sendTelegramMessage } from "@/src/lib/telegram";
-import Image from "next/image";
 /* ================= CREATE REPORT ================= */
 
 async function createReport(formData: FormData) {
@@ -46,7 +45,7 @@ async function createReport(formData: FormData) {
       comment,
     },
   });
-} catch (error) {
+} catch {
   throw new Error("Report already submitted today");
 }
 

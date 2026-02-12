@@ -10,7 +10,7 @@ export async function GET() {
     });
 
     return NextResponse.json(students);
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: "Failed to fetch students" },
       { status: 500 }
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json(student);
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { error: "Failed to create student" },
       { status: 500 }

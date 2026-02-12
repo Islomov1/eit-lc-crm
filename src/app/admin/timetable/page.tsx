@@ -1,0 +1,217 @@
+import { prisma } from "@/src/lib/prisma";
+import { GroupStatus } from "@prisma/client";
+export default async function TimetablePage({
+  searchParams,
+}: {
+searchParams?: {
+  program?: string;
+  teacher?: string;
+  status?: string;   // 👈 ВОТ ЭТО ДОБАВИТЬ
+};
+}) {
+const programFilter =
+  typeof searchParams?.program === "string"
+    ? searchParams.program
+    : undefined;
+
+const statusFilter =
+  typeof searchParams?.status === "string" &&
+  Object.values(GroupStatus).includes(searchParams.status as GroupStatus)
+    ? (searchParams.status as GroupStatus)
+    : undefined;
+
+const teacherFilter =
+  typeof searchParams?.teacher === "string"
+    ? searchParams.teacher
+    : undefined;
+
+const groups = await prisma.group.findMany({
+  where: {
+    ...(programFilter ? { programId: programFilter } : {}),
+    ...(teacherFilter ? { teacherId: teacherFilter } : {}),
+    ...(statusFilter ? { status: statusFilter } : {}),
+  },
+  include: {
+    teacher: true,
+    program: true,
+    students: true,
+  },
+  orderBy: { startTime: "asc" },
+});
+const programs = await prisma.program.findMany({
+  orderBy: { name: "asc" },
+});
+
+const teachers = await prisma.user.findMany({
+  where: { role: "TEACHER" },
+  orderBy: { name: "asc" },
+});
+
+  return (
+    <div className="space-y-10">
+
+      <h1 className="text-2xl font-bold">
+        Timetable
+      </h1>
+
+      {/* FILTERS */}
+      <div className="bg-white p-6 rounded-2xl shadow">
+        <form className="grid grid-cols-3 gap-4">
+
+          <select
+            name="program"
+            defaultValue={programFilter || ""}
+            className="border p-2 rounded"
+          >
+            <option value="">All Programs</option>
+            {programs.map((p) => (
+              <option key={p.id} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            name="teacher"
+            defaultValue={teacherFilter || ""}
+            className="border p-2 rounded"
+          >
+            <option value="">All Teachers</option>
+            {teachers.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+
+          <button className="bg-black text-white rounded-lg py-2">
+            Apply Filters
+          </button>
+
+        </form>
+      </div>
+<form className="flex gap-4 mb-6">
+
+  <select name="program">
+    <option value="">All Programs</option>
+    {programs.map(p => (
+      <option key={p.id} value={p.id}>
+        {p.name}
+      </option>
+    ))}
+  </select>
+
+  <select name="teacher">
+    <option value="">All Teachers</option>
+    {teachers.map(t => (
+      <option key={t.id} value={t.id}>
+        {t.name}
+      </option>
+    ))}
+  </select>
+
+  <select name="status">
+    <option value="">All Status</option>
+    <option value="NEW">NEW</option>
+    <option value="ACTIVE">ACTIVE</option>
+    <option value="FINISHING">FINISHING</option>
+    <option value="EXPIRED">EXPIRED</option>
+  </select>
+
+  <button>Filter</button>
+
+</form>
+
+      {/* TABLE */}
+      <div className="bg-white rounded-2xl shadow p-6">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left">
+              <th className="pb-3">Group</th>
+              <th>Program</th>
+              <th>Schedule</th>
+              <th>Time</th>
+              <th>Teacher</th>
+              <th>Month</th>
+            </tr>
+          </thead>
+
+         <tbody>
+  {groups.map((group) => (
+    <tr key={group.id} className="border-b hover:bg-gray-50">
+      <td className="py-3 font-medium">
+        {group.name}
+      </td>
+
+      <td>
+        {group.program?.name || "N/A"}
+      </td>
+
+      <td>
+        {group.schedule}
+      </td>
+
+      <td>
+        {group.startTime} – {group.endTime}
+      </td>
+
+      <td>
+        {group.teacher?.name ?? "Not assigned"}
+      </td>
+
+      <td>
+        {group.students.length}
+      </td>
+
+      <td>
+        Month {group.month}
+      </td>
+
+      <td>
+        {group.status === "NEW" && (
+          <Badge color="green">NEW</Badge>
+        )}
+
+        {group.status === "ACTIVE" && (
+          <Badge color="blue">ACTIVE</Badge>
+        )}
+
+        {group.status === "FINISHING" && (
+          <Badge color="orange">FINISHING</Badge>
+        )}
+
+        {group.status === "EXPIRED" && (
+          <Badge color="red">EXPIRED</Badge>
+        )}
+      </td>
+    </tr>
+  ))}
+</tbody>
+        </table>
+      </div>
+
+    </div>
+  );
+}
+function Badge({
+  color,
+  children,
+}: {
+  color: "green" | "blue" | "orange" | "red";
+  children: React.ReactNode;
+}) {
+  const colors = {
+    green: "bg-green-100 text-green-700",
+    blue: "bg-blue-100 text-blue-700",
+    orange: "bg-orange-100 text-orange-700",
+    red: "bg-red-100 text-red-700",
+  };
+
+  return (
+    <span
+      className={`px-3 py-1 rounded-full text-xs font-semibold ${colors[color]}`}
+    >
+      {children}
+    </span>
+  );
+}

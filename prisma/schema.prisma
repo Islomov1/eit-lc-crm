@@ -3,9 +3,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
+
 
 enum Role {
   ADMIN
@@ -42,19 +44,32 @@ model User {
   supportSessions SupportSession[] @relation("SupportUser")
 }
 
+enum GroupStatus {
+  NEW
+  ACTIVE
+  FINISHING
+  EXPIRED
+  
+}
+
 model Group {
   id        String       @id @default(uuid())
   name      String
   schedule  ScheduleType
   startTime String
   endTime   String
-  createdAt DateTime     @default(now())
+  month     Int          @default(1)
+  status    GroupStatus  @default(NEW)
+
+  programId String
+  program   Program @relation(fields: [programId], references: [id])
 
   teacherId String?
-  teacher   User? @relation("TeacherGroups", fields: [teacherId], references: [id])
+  teacher   User?   @relation("TeacherGroups", fields: [teacherId], references: [id])
 
   students  Student[]
   reports   Report[]
+  createdAt DateTime  @default(now())
 }
 
 model Student {
@@ -62,8 +77,8 @@ model Student {
   name      String
   createdAt DateTime @default(now())
 
-  groupId   String?
-  group     Group?  @relation(fields: [groupId], references: [id])
+  groupId String?
+  group   Group?  @relation(fields: [groupId], references: [id])
 
   parents         Parent[]
   reports         Report[]
@@ -77,26 +92,26 @@ model Parent {
   telegramId String?
   createdAt  DateTime @default(now())
 
-  studentId  String
-  student    Student @relation(fields: [studentId], references: [id])
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
 }
 
 model Report {
-  id         String           @id @default(uuid())
-  date       DateTime         @default(now())
+  id   String   @id @default(uuid())
+  date DateTime @default(now())
 
   attendance AttendanceStatus
   homework   HomeworkStatus
   comment    String?
 
-  studentId  String
-  student    Student @relation(fields: [studentId], references: [id])
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
 
-  teacherId  String
-  teacher    User @relation("TeacherReports", fields: [teacherId], references: [id])
+  teacherId String
+  teacher   User   @relation("TeacherReports", fields: [teacherId], references: [id])
 
-  groupId    String
-  group      Group @relation(fields: [groupId], references: [id])
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id])
 
   @@unique([studentId, date])
 }
@@ -112,5 +127,20 @@ model SupportSession {
   student   Student @relation(fields: [studentId], references: [id])
 
   supportId String
-  support   User @relation("SupportUser", fields: [supportId], references: [id])
+  support   User   @relation("SupportUser", fields: [supportId], references: [id])
+}
+
+enum GroupStage {
+  MONTH_1
+  MONTH_2
+  MONTH_3
+  MONTH_4
+  MONTH_5
+  MONTH_6
+}
+
+model Program {
+  id     String  @id @default(uuid())
+  name   String  @unique
+  groups Group[]
 }
