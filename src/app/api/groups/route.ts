@@ -1,27 +1,17 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/src/lib/prisma";
 
-export async function GET() {
+export async function POST(request: Request) {
   try {
-    const groups = await prisma.group.findMany({
-      include: {
-        teacher: true,
-        students: true,
-      },
-    });
+    const { name, schedule, startTime, endTime, programId, teacherId } =
+      await request.json();
 
-    return NextResponse.json(groups);
-  } catch {
-    return NextResponse.json(
-      { error: "Failed to fetch groups" },
-      { status: 500 }
-    );
-  }
-}
-
-export async function POST(req: Request) {
-  try {
-    const { name, schedule, startTime, endTime } = await req.json();
+    if (!name || !schedule || !startTime || !endTime || !programId) {
+      return NextResponse.json(
+        { error: "Missing required fields" },
+        { status: 400 }
+      );
+    }
 
     const group = await prisma.group.create({
       data: {
@@ -29,11 +19,14 @@ export async function POST(req: Request) {
         schedule,
         startTime,
         endTime,
+        programId,
+        teacherId: teacherId || null,
+        month: 1,
       },
     });
 
     return NextResponse.json(group);
-  } catch  {
+  } catch {
     return NextResponse.json(
       { error: "Failed to create group" },
       { status: 500 }
