@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { prisma } from "../../../lib/prisma";
-import bcrypt from "bcrypt";
+import { prisma } from "@/src/lib/prisma";
+import bcrypt from "bcryptjs";
+import { cookies } from "next/headers";
 
 export async function POST(req: Request) {
   try {
@@ -26,6 +27,21 @@ export async function POST(req: Request) {
       );
     }
 
+    const cookieStore = await cookies();
+
+    // 🔥 ЯВНО ПРИВОДИМ К СТРОКЕ
+    cookieStore.set("userId", String(user.id), {
+      httpOnly: true,
+      path: "/",
+    });
+
+    cookieStore.set("userRole", user.role.toString().trim(), {
+      httpOnly: true,
+      path: "/",
+    });
+
+    console.log("LOGIN ROLE:", user.role);
+
     return NextResponse.json({
       user: {
         id: user.id,
@@ -34,6 +50,7 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+    console.error(error);
     return NextResponse.json(
       { error: "Server error" },
       { status: 500 }

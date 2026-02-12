@@ -1,3 +1,5 @@
-export default function HomePage() {
-  return <h1>EIT System Running</h1>;
+import { redirect } from "next/navigation";
+
+export default function Home() {
+  redirect("/login");
 }
