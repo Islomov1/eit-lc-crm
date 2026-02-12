@@ -3,27 +3,39 @@ import { prisma } from "@/src/lib/prisma";
 
 export async function POST(request: Request) {
   try {
-    const { name, schedule, startTime, endTime, programId, teacherId } =
-      await request.json();
+const body = (await request.json()) as {
+  name?: string;
+  schedule?: "MWF" | "TTS";
+  startTime?: string;
+  endTime?: string;
+  programId?: string;
+  teacherId?: string | null;
+};
 
-    if (!name || !schedule || !startTime || !endTime || !programId) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
-    }
+const { name, schedule, startTime, endTime, programId, teacherId } = body;
 
-    const group = await prisma.group.create({
-      data: {
-        name,
-        schedule,
-        startTime,
-        endTime,
-        programId,            // ← КРИТИЧНО
-        teacherId: teacherId || null,
-        month: 1,
-      },
-    });
+if (!name || !schedule || !startTime || !endTime || !programId) {
+  return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+}
+
+
+const group = await prisma.group.create({
+  data: {
+    name,
+    schedule,
+    startTime,
+    endTime,
+    month: 1,
+
+    program: {
+      connect: { id: programId },
+    },
+
+    ...(teacherId
+      ? { teacher: { connect: { id: teacherId } } }
+      : {}),
+  },
+});
 
     return NextResponse.json(group);
   } catch {
