@@ -18,10 +18,8 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "./*"
-      ]
-    },
+  "@/*": ["./src/*"]
+},
     "incremental": true,
     "plugins": [
       {
@@ -35,7 +33,7 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
-  ],
+, "src/app/api/admin/ui/create-parent-invite"  ],
   "exclude": [
     "node_modules"
   ]

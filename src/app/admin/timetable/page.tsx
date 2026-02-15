@@ -1,63 +1,57 @@
-import { prisma } from "@/src/lib/prisma";
+// src/app/admin/timetable/page.tsx
+import React from "react";
+import { prisma } from "@/lib/prisma";
 import { GroupStatus } from "@prisma/client";
+
+type SP = Record<string, string | string[] | undefined>;
+
 export default async function TimetablePage({
   searchParams,
 }: {
-searchParams?: {
-  program?: string;
-  teacher?: string;
-  status?: string;   // 👈 ВОТ ЭТО ДОБАВИТЬ
-};
+  searchParams: Promise<SP>;
 }) {
-const programFilter =
-  typeof searchParams?.program === "string"
-    ? searchParams.program
-    : undefined;
+  const sp = await searchParams;
 
-const statusFilter =
-  typeof searchParams?.status === "string" &&
-  Object.values(GroupStatus).includes(searchParams.status as GroupStatus)
-    ? (searchParams.status as GroupStatus)
-    : undefined;
+  const programFilter = typeof sp.program === "string" ? sp.program : undefined;
 
-const teacherFilter =
-  typeof searchParams?.teacher === "string"
-    ? searchParams.teacher
-    : undefined;
+  const statusFilter =
+    typeof sp.status === "string" &&
+    (Object.values(GroupStatus) as string[]).includes(sp.status)
+      ? (sp.status as GroupStatus)
+      : undefined;
 
-const groups = await prisma.group.findMany({
-  where: {
-    ...(programFilter ? { programId: programFilter } : {}),
-    ...(teacherFilter ? { teacherId: teacherFilter } : {}),
-    ...(statusFilter ? { status: statusFilter } : {}),
-  },
-  include: {
-    teacher: true,
-    program: true,
-    students: true,
-  },
-  orderBy: { startTime: "asc" },
-});
-const programs = await prisma.program.findMany({
-  orderBy: { name: "asc" },
-});
+  const teacherFilter = typeof sp.teacher === "string" ? sp.teacher : undefined;
 
-const teachers = await prisma.user.findMany({
-  where: { role: "TEACHER" },
-  orderBy: { name: "asc" },
-});
+  const groups = await prisma.group.findMany({
+    where: {
+      ...(programFilter ? { programId: programFilter } : {}),
+      ...(teacherFilter ? { teacherId: teacherFilter } : {}),
+      ...(statusFilter ? { status: statusFilter } : {}),
+    },
+    include: {
+      teacher: true,
+      program: true,
+      students: true,
+    },
+    orderBy: { startTime: "asc" },
+  });
+
+  const programs = await prisma.program.findMany({
+    orderBy: { name: "asc" },
+  });
+
+  const teachers = await prisma.user.findMany({
+    where: { role: "TEACHER" },
+    orderBy: { name: "asc" },
+  });
 
   return (
     <div className="space-y-10">
-
-      <h1 className="text-2xl font-bold">
-        Timetable
-      </h1>
+      <h1 className="text-2xl font-bold">Timetable</h1>
 
       {/* FILTERS */}
       <div className="bg-white p-6 rounded-2xl shadow">
-        <form className="grid grid-cols-3 gap-4">
-
+        <form className="grid grid-cols-4 gap-4">
           <select
             name="program"
             defaultValue={programFilter || ""}
@@ -65,7 +59,7 @@ const teachers = await prisma.user.findMany({
           >
             <option value="">All Programs</option>
             {programs.map((p) => (
-              <option key={p.id} value={p.name}>
+              <option key={p.id} value={p.id}>
                 {p.name}
               </option>
             ))}
@@ -84,43 +78,23 @@ const teachers = await prisma.user.findMany({
             ))}
           </select>
 
+          <select
+            name="status"
+            defaultValue={statusFilter || ""}
+            className="border p-2 rounded"
+          >
+            <option value="">All Status</option>
+            <option value="NEW">NEW</option>
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="FINISHING">FINISHING</option>
+            <option value="EXPIRED">EXPIRED</option>
+          </select>
+
           <button className="bg-black text-white rounded-lg py-2">
             Apply Filters
           </button>
-
         </form>
       </div>
-<form className="flex gap-4 mb-6">
-
-  <select name="program">
-    <option value="">All Programs</option>
-    {programs.map(p => (
-      <option key={p.id} value={p.id}>
-        {p.name}
-      </option>
-    ))}
-  </select>
-
-  <select name="teacher">
-    <option value="">All Teachers</option>
-    {teachers.map(t => (
-      <option key={t.id} value={t.id}>
-        {t.name}
-      </option>
-    ))}
-  </select>
-
-  <select name="status">
-    <option value="">All Status</option>
-    <option value="NEW">NEW</option>
-    <option value="ACTIVE">ACTIVE</option>
-    <option value="FINISHING">FINISHING</option>
-    <option value="EXPIRED">EXPIRED</option>
-  </select>
-
-  <button>Filter</button>
-
-</form>
 
       {/* TABLE */}
       <div className="bg-white rounded-2xl shadow p-6">
@@ -132,67 +106,41 @@ const teachers = await prisma.user.findMany({
               <th>Schedule</th>
               <th>Time</th>
               <th>Teacher</th>
+              <th>Students</th>
               <th>Month</th>
+              <th>Status</th>
             </tr>
           </thead>
 
-         <tbody>
-  {groups.map((group) => (
-    <tr key={group.id} className="border-b hover:bg-gray-50">
-      <td className="py-3 font-medium">
-        {group.name}
-      </td>
-
-      <td>
-        {group.program?.name || "N/A"}
-      </td>
-
-      <td>
-        {group.schedule}
-      </td>
-
-      <td>
-        {group.startTime} – {group.endTime}
-      </td>
-
-      <td>
-        {group.teacher?.name ?? "Not assigned"}
-      </td>
-
-      <td>
-        {group.students.length}
-      </td>
-
-      <td>
-        Month {group.month}
-      </td>
-
-      <td>
-        {group.status === "NEW" && (
-          <Badge color="green">NEW</Badge>
-        )}
-
-        {group.status === "ACTIVE" && (
-          <Badge color="blue">ACTIVE</Badge>
-        )}
-
-        {group.status === "FINISHING" && (
-          <Badge color="orange">FINISHING</Badge>
-        )}
-
-        {group.status === "EXPIRED" && (
-          <Badge color="red">EXPIRED</Badge>
-        )}
-      </td>
-    </tr>
-  ))}
-</tbody>
+          <tbody>
+            {groups.map((group) => (
+              <tr key={group.id} className="border-b hover:bg-gray-50">
+                <td className="py-3 font-medium">{group.name}</td>
+                <td>{group.program?.name || "N/A"}</td>
+                <td>{group.schedule}</td>
+                <td>
+                  {group.startTime} – {group.endTime}
+                </td>
+                <td>{group.teacher?.name ?? "Not assigned"}</td>
+                <td>{group.students.length}</td>
+                <td>Month {group.month}</td>
+                <td>
+                  {group.status === "NEW" && <Badge color="green">NEW</Badge>}
+                  {group.status === "ACTIVE" && <Badge color="blue">ACTIVE</Badge>}
+                  {group.status === "FINISHING" && (
+                    <Badge color="orange">FINISHING</Badge>
+                  )}
+                  {group.status === "EXPIRED" && <Badge color="red">EXPIRED</Badge>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
-
     </div>
   );
 }
+
 function Badge({
   color,
   children,
@@ -208,9 +156,7 @@ function Badge({
   };
 
   return (
-    <span
-      className={`px-3 py-1 rounded-full text-xs font-semibold ${colors[color]}`}
-    >
+    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${colors[color]}`}>
       {children}
     </span>
   );

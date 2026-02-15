@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { prisma } from "@/src/lib/prisma";
+import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { Prisma, GroupStatus } from "@prisma/client";
 

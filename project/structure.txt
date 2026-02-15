@@ -1,0 +1,23 @@
+
+/Users/tokhir/Desktop/eit-it-tracking
+├── README.md
+├── eslint.config.mjs
+├── next-env.d.ts
+├── next.config.ts
+├── node_modules
+├── package-lock.json
+├── package.json
+├── postcss.config.mjs
+├── prisma
+├── public
+├── scripts
+├── src
+├── structure.txt
+├── tailwind.config.ts
+└── tsconfig.json
+
+directory: 5 file: 10
+
+
+
+[2K[1G

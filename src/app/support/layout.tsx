@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { prisma } from "@/src/lib/prisma";
+import { prisma } from "@/lib/prisma";
 
 export default async function SupportLayout({
   children,

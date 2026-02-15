@@ -1,120 +1,109 @@
-import { prisma } from "@/src/lib/prisma";
+import { prisma } from "@/lib/prisma";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { AttendanceStatus, HomeworkStatus } from "@prisma/client";
-import { sendTelegramMessage } from "@/src/lib/telegram";
+import { sendTelegramMessage } from "@/lib/telegram";
 /* ================= CREATE REPORT ================= */
 
 async function createReport(formData: FormData) {
   "use server";
 
-  const studentId = formData.get("studentId")?.toString();
-  const teacherId = formData.get("teacherId")?.toString();
-  const groupId = formData.get("groupId")?.toString();
+  const cookieStore = await cookies();
+  const teacherId = cookieStore.get("userId")?.value;
 
+  const studentId = formData.get("studentId")?.toString();
+  const groupId = formData.get("groupId")?.toString();
   const attendance = formData.get("attendance")?.toString();
   const homework = formData.get("homework")?.toString();
   const comment = formData.get("comment")?.toString();
 
-  if (
-    !studentId ||
-    !teacherId ||
-    !groupId ||
-    !attendance ||
-    !homework
-  ) {
-    return;
-  }
+  if (!teacherId || !studentId || !groupId || !attendance || !homework) return;
 
-  // Type-safe cast
-  const attendanceValue =
-    attendance as AttendanceStatus;
+  // проверяем, что это реально учитель
+  const teacher = await prisma.user.findUnique({
+    where: { id: teacherId },
+    select: { id: true, name: true, role: true },
+  });
+  if (!teacher || teacher.role !== "TEACHER") return;
 
-  const homeworkValue =
-    homework as HomeworkStatus;
+  const attendanceValue = attendance as AttendanceStatus;
+  const homeworkValue = homework as HomeworkStatus;
+
+  // dateKey (чтобы уникальность работала нормально)
+  const now = new Date();
+  const dateKey = now.toISOString().slice(0, 10); // YYYY-MM-DD
 
   try {
-  await prisma.report.create({
-    data: {
-      studentId,
-      teacherId,
-      groupId,
-      attendance: attendanceValue,
-      homework: homeworkValue,
-      comment,
-    },
-  });
-} catch {
-  throw new Error("Report already submitted today");
-}
+    await prisma.report.create({
+      data: {
+        studentId,
+        teacherId: teacher.id,
+        groupId,
+        dateKey,
+        attendance: attendanceValue,
+        homework: homeworkValue,
+        comment,
+      },
+    });
+  } catch {
+    throw new Error("Report already submitted today");
+  }
 
   const student = await prisma.student.findUnique({
     where: { id: studentId },
-    include: { parents: true },
+    include: { parents: true, group: true },
   });
-
   if (!student) return;
 
-const attendanceText =
-  attendanceValue === "PRESENT"
-    ? "Присутствовал"
-    : "Отсутствовал";
+  const attendanceText = attendanceValue === "PRESENT" ? "Присутствовал" : "Отсутствовал";
+  const homeworkText =
+    homeworkValue === "DONE" ? "Выполнено полностью" :
+    homeworkValue === "PARTIAL" ? "Выполнено частично" : "Не выполнено";
 
-const homeworkText =
-  homeworkValue === "DONE"
-    ? "Выполнено полностью"
-    : homeworkValue === "PARTIAL"
-    ? "Выполнено частично"
-    : "Не выполнено";
+  const attendanceUz = attendanceValue === "PRESENT" ? "Darsda qatnashdi" : "Darsda qatnashmadi";
+  const homeworkUz =
+    homeworkValue === "DONE" ? "To‘liq bajarilgan" :
+    homeworkValue === "PARTIAL" ? "Qisman bajarilgan" : "Bajarilmagan";
 
-const attendanceUz =
-  attendanceValue === "PRESENT"
-    ? "Darsda qatnashdi"
-    : "Darsda qatnashmadi";
-
-const homeworkUz =
-  homeworkValue === "DONE"
-    ? "To‘liq bajarilgan"
-    : homeworkValue === "PARTIAL"
-    ? "Qisman bajarilgan"
-    : "Bajarilmagan";
-
-const message = `
+  const message = `
 📚 ОТЧЁТ О ЗАНЯТИИ
-Учебный центр EIT
+EIT LC
 
 Ученик: ${student.name}
-
+Группа: ${student.group?.name ?? "-"}
 Посещаемость: ${attendanceText}
 Домашнее задание: ${homeworkText}
-Комментарий преподавателя:
+Комментарий:
 ${comment || "Комментарий отсутствует."}
+
+Отправил(а): ${teacher.name}
 
 —————————————
 
 📚 DARS HISOBOTI
-EIT o‘quv markazi
+EIT LC
 
 O‘quvchi: ${student.name}
-
+Guruh: ${student.group?.name ?? "-"}
 Qatnashuv: ${attendanceUz}
 Uy vazifasi: ${homeworkUz}
-O‘qituvchi izohi:
+Izoh:
 ${comment || "Izoh mavjud emas."}
+
+Yubordi: ${teacher.name}
 `;
 
   for (const parent of student.parents) {
     if (parent.telegramId) {
-      await sendTelegramMessage(
-        parent.telegramId,
-        message
-      );
+      // BigInt -> string
+      await sendTelegramMessage(parent.telegramId.toString(), message);
     }
   }
 
   revalidatePath("/teacher");
 }
+
 
 /* ================= PAGE ================= */
 

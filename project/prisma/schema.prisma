@@ -1,0 +1,214 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+  SUPPORT
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+}
+
+enum HomeworkStatus {
+  DONE
+  PARTIAL
+  NOT_DONE
+}
+
+enum ScheduleType {
+  MWF
+  TTS
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+
+  groups          Group[]          @relation("TeacherGroups")
+  reports         Report[]         @relation("TeacherReports")
+  supportSessions SupportSession[] @relation("SupportUser")
+  parentInvites   ParentInvite[]   @relation("InvitesCreatedByUser")
+}
+
+enum TelegramUpdateStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  ERROR
+}
+
+model TelegramUpdate {
+  id          String               @id @default(uuid())
+  updateId    Int                  @unique
+  payload     Json
+  status      TelegramUpdateStatus @default(RECEIVED)
+  error       String?
+  createdAt   DateTime             @default(now())
+  processedAt DateTime?
+}
+
+enum InviteStatus {
+  ACTIVE
+  USED
+  REVOKED
+  EXPIRED
+}
+
+model ParentInvite {
+  id     String       @id @default(uuid())
+  code   String       @unique
+  status InviteStatus @default(ACTIVE)
+
+  // К чему привязываем
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
+
+  // кто создал (админ/учитель/саппорт)
+  createdById String?
+  createdBy   User?   @relation("InvitesCreatedByUser", fields: [createdById], references: [id])
+
+  parentId String?
+  parent   Parent? @relation("InvitesUsedByParent", fields: [parentId], references: [id])
+
+  createdAt DateTime  @default(now())
+  usedAt    DateTime?
+  expiresAt DateTime?
+}
+
+model AnalyticsEvent {
+  id        String  @id @default(uuid())
+  name      String // "parent_linked", "report_created", "parent_viewed_report"
+  actorType String? // "USER" | "PARENT" | "SYSTEM" (строкой проще)
+  actorId   String? // User.id или Parent.id, или null для system
+
+  groupId   String?
+  studentId String?
+
+  props     Json?
+  createdAt DateTime @default(now())
+
+  @@index([name, createdAt])
+  @@index([studentId])
+  @@index([groupId])
+}
+
+enum GroupStatus {
+  NEW
+  ACTIVE
+  FINISHING
+  EXPIRED
+}
+
+model Group {
+  id        String       @id @default(uuid())
+  name      String
+  schedule  ScheduleType
+  startTime String
+  endTime   String
+  month     Int          @default(1)
+  status    GroupStatus  @default(NEW)
+
+  programId String
+  program   Program @relation(fields: [programId], references: [id])
+
+  teacherId String?
+  teacher   User?   @relation("TeacherGroups", fields: [teacherId], references: [id])
+
+  students  Student[]
+  reports   Report[]
+  createdAt DateTime  @default(now())
+}
+
+model Student {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  groupId String?
+  group   Group?  @relation(fields: [groupId], references: [id])
+
+  parents         Parent[]
+  reports         Report[]
+  supportSessions SupportSession[]
+  ParentInvite    ParentInvite[]
+}
+
+model Parent {
+  id         String   @id @default(uuid())
+  name       String
+  phone      String
+  telegramId BigInt?  @unique
+  createdAt  DateTime @default(now())
+
+  studentId String
+  student   Student        @relation(fields: [studentId], references: [id])
+  invites   ParentInvite[] @relation("InvitesUsedByParent")
+
+  @@index([studentId])
+}
+
+model Report {
+  id   String   @id @default(uuid())
+  date DateTime @default(now())
+
+  dateKey String // "YYYY-MM-DD" в вашей логике
+
+  attendance AttendanceStatus
+  homework   HomeworkStatus
+  comment    String?
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
+
+  teacherId String
+  teacher   User   @relation("TeacherReports", fields: [teacherId], references: [id])
+
+  groupId String
+  group   Group  @relation(fields: [groupId], references: [id])
+
+  @@unique([studentId, dateKey])
+  @@index([groupId, dateKey])
+}
+
+model SupportSession {
+  id        String   @id @default(uuid())
+  startTime DateTime
+  endTime   DateTime
+  comment   String?
+  createdAt DateTime @default(now())
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
+
+  supportId String
+  support   User   @relation("SupportUser", fields: [supportId], references: [id])
+}
+
+enum GroupStage {
+  MONTH_1
+  MONTH_2
+  MONTH_3
+  MONTH_4
+  MONTH_5
+  MONTH_6
+}
+
+model Program {
+  id     String  @id @default(uuid())
+  name   String  @unique
+  groups Group[]
+}
