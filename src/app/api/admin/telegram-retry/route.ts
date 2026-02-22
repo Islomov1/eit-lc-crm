@@ -1,28 +1,27 @@
+// src/app/api/cron/telegram-deliveries/route.ts
+
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { TelegramDeliveryStatus } from "@prisma/client";
+import { Prisma, TelegramDeliveryStatus } from "@prisma/client";
 import { sendTelegramMessage } from "@/lib/telegram";
+import type { TelegramParseMode, TelegramSendResult } from "@/lib/telegram";
+
+export const runtime = "nodejs";
 
 function isAuthorized(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
 
   const h1 = req.headers.get("x-cron-secret");
-  if (h1 && h1 === secret) return true;
+  if (h1 === secret) return true;
 
   const auth = req.headers.get("authorization");
-  if (auth && auth === `Bearer ${secret}`) return true;
-
-  // fallback: query param (на крайний случай)
-  const url = new URL(req.url);
-  const qs = url.searchParams.get("secret");
-  if (qs && qs === secret) return true;
+  if (auth === `Bearer ${secret}`) return true;
 
   return false;
 }
 
 function backoffMs(attempt: number) {
-  // 30s, 60s, 120s... cap 6h + jitter
   const base = 30_000;
   const cap = 6 * 60 * 60_000;
   const exp = Math.min(cap, base * Math.pow(2, Math.max(0, attempt - 1)));
@@ -30,13 +29,21 @@ function backoffMs(attempt: number) {
   return exp + jitter;
 }
 
-/**
- * Cron endpoint:
- * - берёт FAILED (и PENDING при желании) с nextRetryAt <= now
- * - шлёт
- * - пишет SENT/FAILED + ошибки
- * - защищается от гонок через "claim" updateMany
- */
+function normalizeParseMode(mode: string | null | undefined): TelegramParseMode | undefined {
+  if (mode === "HTML" || mode === "MarkdownV2") return mode;
+  return undefined;
+}
+
+function toJsonSafe(
+  value: unknown
+): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  try {
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+  } catch {
+    return Prisma.DbNull;
+  }
+}
+
 export async function POST(req: Request) {
   if (!isAuthorized(req)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -49,7 +56,6 @@ export async function POST(req: Request) {
   const now = new Date();
   const maxAttempts = 10;
 
-  // Берём кандидатов (FAILED + optionally PENDING)
   const batch = await prisma.telegramDelivery.findMany({
     where: {
       status: includePending
@@ -66,11 +72,10 @@ export async function POST(req: Request) {
   let sent = 0;
   let failed = 0;
   let skipped = 0;
+
   const details: Array<{ id: string; status: "SENT" | "FAILED" | "SKIPPED"; error?: string }> = [];
 
   for (const d of batch) {
-    // Claim: чтобы два cron-а/два процесса не отправили одно и то же
-    // Мы "захватываем" запись и увеличиваем attemptCount
     const claim = await prisma.telegramDelivery.updateMany({
       where: {
         id: d.id,
@@ -81,9 +86,8 @@ export async function POST(req: Request) {
       data: {
         attemptCount: { increment: 1 },
         lastAttemptAt: now,
-        // очищаем старую ошибку перед новой попыткой
         error: null,
-        errorPayload: null,
+        errorPayload: Prisma.DbNull,
       },
     });
 
@@ -95,16 +99,26 @@ export async function POST(req: Request) {
 
     processed++;
 
-    // перечитываем, чтобы получить актуальный attemptCount (после increment)
-    const fresh = await prisma.telegramDelivery.findUnique({ where: { id: d.id } });
-    const attempt = fresh?.attemptCount ?? d.attemptCount + 1;
+    const attempt = d.attemptCount + 1;
 
-    const tg = await sendTelegramMessage(d.chatId, d.messageText, {
-      parseMode: (d.parseMode as any) ?? undefined,
-    });
+    let tg: TelegramSendResult;
+    try {
+      tg = await sendTelegramMessage(d.chatId, d.messageText, {
+        parseMode: normalizeParseMode(d.parseMode),
+      });
+    } catch (err: unknown) {
+      const safePayload =
+        err instanceof Error
+          ? { name: err.name, message: err.message, stack: err.stack }
+          : err;
+
+      const msg = err instanceof Error ? err.message : "sendTelegramMessage threw";
+      tg = { ok: false, error: msg, payload: safePayload };
+    }
 
     if (tg.ok) {
       sent++;
+
       await prisma.telegramDelivery.update({
         where: { id: d.id },
         data: {
@@ -113,7 +127,7 @@ export async function POST(req: Request) {
           telegramMessageId: tg.messageId,
           nextRetryAt: null,
           error: null,
-          errorPayload: null,
+          errorPayload: Prisma.DbNull,
         },
       });
 
@@ -121,7 +135,6 @@ export async function POST(req: Request) {
     } else {
       failed++;
 
-      // если уже достигли лимита попыток — прекращаем планировать retry
       const nextRetryAt =
         attempt >= maxAttempts ? null : new Date(Date.now() + backoffMs(attempt));
 
@@ -131,7 +144,7 @@ export async function POST(req: Request) {
           status: TelegramDeliveryStatus.FAILED,
           nextRetryAt,
           error: tg.error,
-          errorPayload: (tg as any).payload ?? null,
+          errorPayload: toJsonSafe("payload" in tg ? tg.payload : null),
         },
       });
 
@@ -154,8 +167,6 @@ export async function POST(req: Request) {
   });
 }
 
-// Удобно для ручного теста из браузера/URL (если нужно)
 export async function GET(req: Request) {
-  // Делегируем на POST (чтобы можно было дернуть curl без -X POST)
   return POST(req);
 }

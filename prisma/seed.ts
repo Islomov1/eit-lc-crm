@@ -1,26 +1,35 @@
-import {
+// prisma/seed.ts
+import bcrypt from "bcryptjs";
+
+// CJS-compatible import for Prisma when ts-node runs in ESM mode
+import prismaPkg from "@prisma/client";
+const {
   PrismaClient,
   Role,
   ScheduleType,
   GroupStatus,
   AttendanceStatus,
   HomeworkStatus,
-  Program,
-} from "@prisma/client";
-import bcrypt from "bcryptjs";
+} = prismaPkg;
 
 const prisma = new PrismaClient();
+
+function dateKey(d = new Date()) {
+  // YYYY-MM-DD
+  return d.toISOString().slice(0, 10);
+}
 
 async function main() {
   console.log("🌱 Starting full EIT LC CRM seed...");
 
-  /* ================= USERS ================= */
+  const dk = dateKey();
 
+  /* ================= USERS ================= */
   const adminPassword = await bcrypt.hash("admin123", 10);
   const teacherPassword = await bcrypt.hash("teacher123", 10);
   const supportPassword = await bcrypt.hash("support123", 10);
 
-await prisma.user.upsert({
+  await prisma.user.upsert({
     where: { email: "admin@eitlc.com" },
     update: {},
     create: {
@@ -65,31 +74,20 @@ await prisma.user.upsert({
   });
 
   /* ================= PROGRAMS ================= */
+  const programNames = ["A1", "A2", "B1", "B2", "C1", "IELTS", "SAT", "MATHS", "CUSTOM"];
 
-  const programNames = [
-    "A1",
-    "A2",
-    "B1",
-    "B2",
-    "C1",
-    "IELTS",
-    "SAT",
-    "MATHS",
-    "CUSTOM",
-  ];
-
-const programs: Record<string, Program> = {};
+  const programs: Record<string, { id: string; name: string }> = {};
 
   for (const name of programNames) {
-    programs[name] = await prisma.program.upsert({
+    const p = await prisma.program.upsert({
       where: { name },
       update: {},
       create: { name },
     });
+    programs[name] = { id: p.id, name: p.name };
   }
 
   /* ================= GROUPS ================= */
-
   const groupA1 = await prisma.group.create({
     data: {
       name: "A1 Morning",
@@ -117,36 +115,25 @@ const programs: Record<string, Program> = {};
   });
 
   /* ================= STUDENTS ================= */
-
   const ali = await prisma.student.create({
-    data: {
-      name: "Ali Karimov",
-      groupId: groupA1.id,
-    },
+    data: { name: "Ali Karimov", groupId: groupA1.id },
   });
 
   const madina = await prisma.student.create({
-    data: {
-      name: "Madina Saidova",
-      groupId: groupIELTS.id,
-    },
+    data: { name: "Madina Saidova", groupId: groupIELTS.id },
   });
 
   const aziz = await prisma.student.create({
-    data: {
-      name: "Aziz Nurmatov",
-      groupId: groupA1.id,
-    },
+    data: { name: "Aziz Nurmatov", groupId: groupA1.id },
   });
 
   /* ================= PARENTS ================= */
-
   await prisma.parent.createMany({
     data: [
       {
         name: "Karim Karimov",
         phone: "+998901112233",
-        telegramId: "123456789",
+        telegramId: BigInt("123456789"),
         studentId: ali.id,
       },
       {
@@ -158,25 +145,25 @@ const programs: Record<string, Program> = {};
       {
         name: "Said Saidov",
         phone: "+998909998877",
-        telegramId: "987654321",
+        telegramId: BigInt("987654321"),
         studentId: madina.id,
       },
       {
         name: "Nurmat Nurmatov",
         phone: "+998901234567",
-        telegramId: "555555555",
+        telegramId: BigInt("555555555"),
         studentId: aziz.id,
       },
     ],
   });
 
   /* ================= REPORTS ================= */
-
   await prisma.report.create({
     data: {
       studentId: ali.id,
       teacherId: teacher1.id,
       groupId: groupA1.id,
+      dateKey: dk,
       attendance: AttendanceStatus.PRESENT,
       homework: HomeworkStatus.DONE,
       comment: "Excellent participation and active engagement.",
@@ -188,6 +175,7 @@ const programs: Record<string, Program> = {};
       studentId: madina.id,
       teacherId: teacher2.id,
       groupId: groupIELTS.id,
+      dateKey: dk,
       attendance: AttendanceStatus.ABSENT,
       homework: HomeworkStatus.NOT_DONE,
       comment: "Student was absent. Homework not submitted.",
@@ -195,7 +183,6 @@ const programs: Record<string, Program> = {};
   });
 
   /* ================= SUPPORT SESSION ================= */
-
   await prisma.supportSession.create({
     data: {
       studentId: ali.id,
@@ -206,7 +193,7 @@ const programs: Record<string, Program> = {};
     },
   });
 
-  console.log("✅ Full EIT LC CRM seed completed successfully.");
+  console.log("✅ Seed completed.");
 }
 
 main()

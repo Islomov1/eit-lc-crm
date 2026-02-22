@@ -1,8 +1,9 @@
 // src/lib/telegramDelivery.ts
 import crypto from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { TelegramDeliveryStatus } from "@prisma/client";
+import { Prisma, TelegramDeliveryStatus } from "@prisma/client";
 import { sendTelegramMessage } from "@/lib/telegram";
+import type { TelegramParseMode } from "@/lib/telegram";
 
 type Actor =
   | { type: "USER"; id: string }
@@ -10,11 +11,11 @@ type Actor =
   | { type: "SYSTEM"; id?: string };
 
 type SendOptions = {
-  parseMode?: "HTML" | "MarkdownV2";
+  parseMode?: TelegramParseMode;
   sourceType?: string;
   sourceId?: string;
   idempotencyKey?: string;
-  force?: boolean; // игнорировать nextRetryAt
+  force?: boolean; // ignore nextRetryAt
 };
 
 function sha256(s: string) {
@@ -22,12 +23,24 @@ function sha256(s: string) {
 }
 
 function backoffMs(attempt: number) {
-  // 30s, 60s, 120s... cap 6h + jitter
   const base = 30_000;
   const cap = 6 * 60 * 60_000;
   const exp = Math.min(cap, base * Math.pow(2, Math.max(0, attempt - 1)));
   const jitter = Math.floor(Math.random() * 5_000);
   return exp + jitter;
+}
+
+function normalizeParseMode(mode: string | null | undefined): TelegramParseMode | undefined {
+  if (mode === "HTML" || mode === "MarkdownV2") return mode;
+  return undefined;
+}
+
+function toJsonSafe(value: unknown): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  try {
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+  } catch {
+    return Prisma.DbNull;
+  }
 }
 
 export async function sendTelegramToStudentParents(
@@ -52,18 +65,20 @@ export async function sendTelegramToStudentParents(
     options.idempotencyKey ??
     (options.sourceType && options.sourceId
       ? `${options.sourceType}:${options.sourceId}`
-      : sha256(`${studentId}|${message}|${actor.type}|${"id" in actor ? actor.id ?? "" : ""}`));
+      : sha256(
+          `${studentId}|${message}|${actor.type}|${"id" in actor ? actor.id ?? "" : ""}`
+        ));
 
-  // 1) создаём delivery строки (если уже есть — skip)
+  // 1) Create delivery rows (skip duplicates)
   await prisma.telegramDelivery.createMany({
     data: parents.map((p) => ({
       studentId,
       parentId: p.id,
-      chatId: p.telegramId as bigint,
+      chatId: p.telegramId as bigint, // safe because filtered above
       messageText: message,
       parseMode: options.parseMode ?? null,
       actorType: actor.type,
-      actorId: "id" in actor ? (actor.id ?? null) : null,
+      actorId: "id" in actor ? actor.id ?? null : null,
       sourceType: options.sourceType ?? null,
       sourceId: options.sourceId ?? null,
       idempotencyKey: baseKey,
@@ -71,7 +86,7 @@ export async function sendTelegramToStudentParents(
     skipDuplicates: true,
   });
 
-  // 2) берём записи и отправляем (без дублей)
+  // 2) Fetch created deliveries
   const deliveries = await prisma.telegramDelivery.findMany({
     where: {
       idempotencyKey: baseKey,
@@ -97,7 +112,7 @@ export async function sendTelegramToStudentParents(
       continue;
     }
 
-    // claim attempt (чтобы параллельные вызовы меньше дублировали)
+    // claim attempt
     const claimed = await prisma.telegramDelivery.updateMany({
       where: {
         id: d.id,
@@ -107,7 +122,7 @@ export async function sendTelegramToStudentParents(
         attemptCount: { increment: 1 },
         lastAttemptAt: now,
         error: null,
-        errorPayload: null,
+        errorPayload: Prisma.DbNull,
       },
     });
 
@@ -116,11 +131,10 @@ export async function sendTelegramToStudentParents(
       continue;
     }
 
-    const fresh = await prisma.telegramDelivery.findUnique({ where: { id: d.id } });
-    const attempt = fresh?.attemptCount ?? d.attemptCount + 1;
+    const attempt = d.attemptCount + 1;
 
     const tg = await sendTelegramMessage(d.chatId, d.messageText, {
-      parseMode: (d.parseMode as any) ?? undefined,
+      parseMode: normalizeParseMode(d.parseMode),
     });
 
     if (tg.ok) {
@@ -132,20 +146,21 @@ export async function sendTelegramToStudentParents(
           telegramMessageId: tg.messageId,
           nextRetryAt: null,
           error: null,
-          errorPayload: null,
+          errorPayload: Prisma.DbNull,
         },
       });
 
       results.push({ parentId: d.parentId, status: "SENT" });
     } else {
       const nextRetryAt = new Date(Date.now() + backoffMs(attempt));
+
       await prisma.telegramDelivery.update({
         where: { id: d.id },
         data: {
           status: TelegramDeliveryStatus.FAILED,
           nextRetryAt,
           error: tg.error,
-          errorPayload: tg.payload ?? null,
+          errorPayload: toJsonSafe("payload" in tg ? tg.payload : null),
         },
       });
 

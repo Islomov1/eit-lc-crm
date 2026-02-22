@@ -8,6 +8,170 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+model User {
+  id              String           @id @default(uuid())
+  name            String
+  email           String           @unique
+  password        String
+  role            Role
+  createdAt       DateTime         @default(now())
+  groups          Group[]          @relation("TeacherGroups")
+  parentInvites   ParentInvite[]   @relation("InvitesCreatedByUser")
+  reports         Report[]         @relation("TeacherReports")
+  supportSessions SupportSession[] @relation("SupportUser")
+}
+
+model TelegramUpdate {
+  id          String               @id @default(uuid())
+  updateId    Int                  @unique
+  payload     Json
+  status      TelegramUpdateStatus @default(RECEIVED)
+  error       String?
+  createdAt   DateTime             @default(now())
+  processedAt DateTime?
+}
+
+model ParentInvite {
+  id          String       @id @default(uuid())
+  code        String       @unique
+  status      InviteStatus @default(ACTIVE)
+  studentId   String
+  createdById String?
+  parentId    String?
+  createdAt   DateTime     @default(now())
+  usedAt      DateTime?
+  expiresAt   DateTime?
+  createdBy   User?        @relation("InvitesCreatedByUser", fields: [createdById], references: [id])
+  parent      Parent?      @relation("InvitesUsedByParent", fields: [parentId], references: [id])
+  student     Student      @relation(fields: [studentId], references: [id])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  name      String
+  actorType String?
+  actorId   String?
+  groupId   String?
+  studentId String?
+  props     Json?
+  createdAt DateTime @default(now())
+
+  @@index([name, createdAt])
+  @@index([studentId])
+  @@index([groupId])
+}
+
+model Group {
+  id        String       @id @default(uuid())
+  name      String
+  schedule  ScheduleType
+  startTime String
+  endTime   String
+  month     Int          @default(1)
+  status    GroupStatus  @default(NEW)
+  programId String
+  teacherId String?
+  createdAt DateTime     @default(now())
+  program   Program      @relation(fields: [programId], references: [id])
+  teacher   User?        @relation("TeacherGroups", fields: [teacherId], references: [id])
+  reports   Report[]
+  students  Student[]
+}
+
+model Student {
+  id                 String             @id @default(uuid())
+  name               String
+  createdAt          DateTime           @default(now())
+  groupId            String?
+  parents            Parent[]
+  ParentInvite       ParentInvite[]
+  reports            Report[]
+  group              Group?             @relation(fields: [groupId], references: [id])
+  supportSessions    SupportSession[]
+  telegramDeliveries TelegramDelivery[]
+}
+
+model Parent {
+  id                 String             @id @default(uuid())
+  name               String
+  phone              String
+  telegramId         BigInt?            @unique
+  createdAt          DateTime           @default(now())
+  studentId          String
+  student            Student            @relation(fields: [studentId], references: [id])
+  invites            ParentInvite[]     @relation("InvitesUsedByParent")
+  telegramDeliveries TelegramDelivery[]
+
+  @@index([studentId])
+}
+
+model Report {
+  id         String           @id @default(uuid())
+  date       DateTime         @default(now())
+  dateKey    String
+  attendance AttendanceStatus
+  homework   HomeworkStatus
+  comment    String?
+  studentId  String
+  teacherId  String
+  groupId    String
+  group      Group            @relation(fields: [groupId], references: [id])
+  student    Student          @relation(fields: [studentId], references: [id])
+  teacher    User             @relation("TeacherReports", fields: [teacherId], references: [id])
+
+  @@unique([studentId, dateKey])
+  @@index([groupId, dateKey])
+}
+
+model SupportSession {
+  id        String   @id @default(uuid())
+  startTime DateTime
+  endTime   DateTime
+  comment   String?
+  createdAt DateTime @default(now())
+  studentId String
+  supportId String
+  student   Student  @relation(fields: [studentId], references: [id])
+  support   User     @relation("SupportUser", fields: [supportId], references: [id])
+}
+
+model Program {
+  id     String  @id @default(uuid())
+  name   String  @unique
+  groups Group[]
+}
+
+model TelegramDelivery {
+  id                String                 @id @default(uuid())
+  studentId         String
+  parentId          String
+  chatId            BigInt
+  messageText       String
+  parseMode         String?
+  actorType         String?
+  actorId           String?
+  sourceType        String?
+  sourceId          String?
+  idempotencyKey    String
+  status            TelegramDeliveryStatus @default(PENDING)
+  attemptCount      Int                    @default(0)
+  lastAttemptAt     DateTime?
+  nextRetryAt       DateTime?
+  sentAt            DateTime?
+  telegramMessageId Int?
+  error             String?
+  errorPayload      Json?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  parent            Parent                 @relation(fields: [parentId], references: [id])
+  student           Student                @relation(fields: [studentId], references: [id])
+
+  @@unique([parentId, idempotencyKey])
+  @@index([status, nextRetryAt])
+  @@index([studentId, createdAt])
+  @@index([parentId, createdAt])
+}
+
 enum Role {
   ADMIN
   TEACHER
@@ -30,35 +194,11 @@ enum ScheduleType {
   TTS
 }
 
-model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role
-  createdAt DateTime @default(now())
-
-  groups          Group[]          @relation("TeacherGroups")
-  reports         Report[]         @relation("TeacherReports")
-  supportSessions SupportSession[] @relation("SupportUser")
-  parentInvites   ParentInvite[]   @relation("InvitesCreatedByUser")
-}
-
 enum TelegramUpdateStatus {
   RECEIVED
   PROCESSED
   IGNORED
   ERROR
-}
-
-model TelegramUpdate {
-  id          String               @id @default(uuid())
-  updateId    Int                  @unique
-  payload     Json
-  status      TelegramUpdateStatus @default(RECEIVED)
-  error       String?
-  createdAt   DateTime             @default(now())
-  processedAt DateTime?
 }
 
 enum InviteStatus {
@@ -68,44 +208,6 @@ enum InviteStatus {
   EXPIRED
 }
 
-model ParentInvite {
-  id     String       @id @default(uuid())
-  code   String       @unique
-  status InviteStatus @default(ACTIVE)
-
-  // К чему привязываем
-  studentId String
-  student   Student @relation(fields: [studentId], references: [id])
-
-  // кто создал (админ/учитель/саппорт)
-  createdById String?
-  createdBy   User?   @relation("InvitesCreatedByUser", fields: [createdById], references: [id])
-
-  parentId String?
-  parent   Parent? @relation("InvitesUsedByParent", fields: [parentId], references: [id])
-
-  createdAt DateTime  @default(now())
-  usedAt    DateTime?
-  expiresAt DateTime?
-}
-
-model AnalyticsEvent {
-  id        String  @id @default(uuid())
-  name      String // "parent_linked", "report_created", "parent_viewed_report"
-  actorType String? // "USER" | "PARENT" | "SYSTEM" (строкой проще)
-  actorId   String? // User.id или Parent.id, или null для system
-
-  groupId   String?
-  studentId String?
-
-  props     Json?
-  createdAt DateTime @default(now())
-
-  @@index([name, createdAt])
-  @@index([studentId])
-  @@index([groupId])
-}
-
 enum GroupStatus {
   NEW
   ACTIVE
@@ -113,150 +215,8 @@ enum GroupStatus {
   EXPIRED
 }
 
-model Group {
-  id        String       @id @default(uuid())
-  name      String
-  schedule  ScheduleType
-  startTime String
-  endTime   String
-  month     Int          @default(1)
-  status    GroupStatus  @default(NEW)
-
-  programId String
-  program   Program @relation(fields: [programId], references: [id])
-
-  teacherId String?
-  teacher   User?   @relation("TeacherGroups", fields: [teacherId], references: [id])
-
-  students  Student[]
-  reports   Report[]
-  createdAt DateTime  @default(now())
-}
-
-model Student {
-  id        String   @id @default(uuid())
-  name      String
-  createdAt DateTime @default(now())
-
-  groupId String?
-  group   Group?  @relation(fields: [groupId], references: [id])
-
-  parents            Parent[]
-  reports            Report[]
-  supportSessions    SupportSession[]
-  ParentInvite       ParentInvite[]
-  telegramDeliveries TelegramDelivery[]
-}
-
-model Parent {
-  id         String   @id @default(uuid())
-  name       String
-  phone      String
-  telegramId BigInt?  @unique
-  createdAt  DateTime @default(now())
-
-  studentId String
-  student   Student        @relation(fields: [studentId], references: [id])
-  invites   ParentInvite[] @relation("InvitesUsedByParent")
-
-  telegramDeliveries TelegramDelivery[]
-
-  @@index([studentId])
-}
-
-model Report {
-  id   String   @id @default(uuid())
-  date DateTime @default(now())
-
-  dateKey String // "YYYY-MM-DD" в вашей логике
-
-  attendance AttendanceStatus
-  homework   HomeworkStatus
-  comment    String?
-
-  studentId String
-  student   Student @relation(fields: [studentId], references: [id])
-
-  teacherId String
-  teacher   User   @relation("TeacherReports", fields: [teacherId], references: [id])
-
-  groupId String
-  group   Group  @relation(fields: [groupId], references: [id])
-
-  @@unique([studentId, dateKey])
-  @@index([groupId, dateKey])
-}
-
-model SupportSession {
-  id        String   @id @default(uuid())
-  startTime DateTime
-  endTime   DateTime
-  comment   String?
-  createdAt DateTime @default(now())
-
-  studentId String
-  student   Student @relation(fields: [studentId], references: [id])
-
-  supportId String
-  support   User   @relation("SupportUser", fields: [supportId], references: [id])
-}
-
-enum GroupStage {
-  MONTH_1
-  MONTH_2
-  MONTH_3
-  MONTH_4
-  MONTH_5
-  MONTH_6
-}
-
-model Program {
-  id     String  @id @default(uuid())
-  name   String  @unique
-  groups Group[]
-}
-
 enum TelegramDeliveryStatus {
   PENDING
   SENT
   FAILED
-}
-
-model TelegramDelivery {
-  id     String                 @id @default(uuid())
-  status TelegramDeliveryStatus @default(PENDING)
-
-  studentId String
-  student   Student @relation(fields: [studentId], references: [id])
-
-  parentId String
-  parent   Parent @relation(fields: [parentId], references: [id])
-
-  chatId      BigInt
-  messageText String
-  parseMode   String? // "HTML" | "MarkdownV2" | null
-
-  actorType String // "USER" | "PARENT" | "SYSTEM"
-  actorId   String?
-
-  sourceType String? // "REPORT" | "SUPPORT_SESSION" | "ATTENDANCE_WARNING" ...
-  sourceId   String?
-
-  idempotencyKey String
-
-  attemptCount      Int       @default(0)
-  lastAttemptAt     DateTime?
-  nextRetryAt       DateTime?
-  sentAt            DateTime?
-  telegramMessageId BigInt?
-
-  error        String?
-  errorPayload Json?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([parentId, idempotencyKey])
-  @@index([studentId, createdAt])
-  @@index([status, nextRetryAt])
 }

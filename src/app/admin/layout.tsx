@@ -16,19 +16,15 @@ export default async function AdminLayout({
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
+    select: { role: true },
   });
 
-  if (!user || user.role !== "ADMIN") {
-    redirect("/");
-  }
+  if (!user) redirect("/login");
+  if (user.role !== "ADMIN") redirect(`/${user.role.toLowerCase()}`);
 
   return (
     <div className="min-h-screen flex bg-gray-100">
-
-      {/* SIDEBAR */}
       <aside className="w-72 bg-white flex flex-col shadow-lg">
-
-        {/* LOGO */}
         <div className="px-6 py-8">
           <Image
             src="/logo.png"
@@ -40,63 +36,29 @@ export default async function AdminLayout({
           />
         </div>
 
-        {/* NAVIGATION */}
-       <nav className="flex-1 px-4 space-y-2 text-sm font-medium">
+        <nav className="flex-1 px-4 space-y-2 text-sm font-medium">
+          <SidebarLink href="/admin">Dashboard</SidebarLink>
+          <SidebarLink href="/admin/timetable">Timetable</SidebarLink>
+          <SidebarLink href="/admin/groups">Groups</SidebarLink>
+          <SidebarLink href="/admin/students">Students</SidebarLink>
+          <SidebarLink href="/admin/users">Users</SidebarLink>
+        </nav>
 
-  <SidebarLink href="/admin">
-    Dashboard
-  </SidebarLink>
-<SidebarLink href="/admin/timetable">
-  Timetable
-</SidebarLink>
-  <SidebarLink href="/admin/groups">
-    Groups
-  </SidebarLink>
-
-  <SidebarLink href="/admin/students">
-    Students
-  </SidebarLink>
-
-  <SidebarLink href="/admin/users">
-    Users
-  </SidebarLink>
-
-</nav>
-
-        {/* LOGOUT BUTTON */}
         <div className="p-6 mt-auto">
           <form action="/api/logout" method="POST">
             <button
-              className="
-                w-full
-                flex items-center justify-center gap-2
-                py-4
-                rounded-2xl
-                bg-red-600
-                text-white
-                font-semibold
-                hover:bg-red-700
-                transition
-                shadow-md
-              "
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-red-600 text-white font-semibold hover:bg-red-700 transition shadow-md"
             >
               Logout
             </button>
           </form>
         </div>
-
       </aside>
 
-      {/* MAIN CONTENT */}
-      <main className="flex-1 p-12">
-        {children}
-      </main>
-
+      <main className="flex-1 p-12">{children}</main>
     </div>
   );
 }
-
-/* ================= SIDEBAR LINK ================= */
 
 function SidebarLink({
   href,
@@ -108,15 +70,7 @@ function SidebarLink({
   return (
     <Link
       href={href}
-      className="
-        block
-        px-4 py-3
-        rounded-xl
-        text-gray-700
-        hover:bg-gray-100
-        hover:text-black
-        transition
-      "
+      className="block px-4 py-3 rounded-xl text-gray-700 hover:bg-gray-100 hover:text-black transition"
     >
       {children}
     </Link>

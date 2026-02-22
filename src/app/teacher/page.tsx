@@ -1,9 +1,10 @@
-import { prisma } from "@/lib/prisma";
+// src/app/teacher/page.tsx
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { AttendanceStatus, HomeworkStatus } from "@prisma/client";
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendTelegramToStudentParents } from "@/lib/telegramDelivery";
+
 /* ================= CREATE REPORT ================= */
 
 async function createReport(formData: FormData) {
@@ -34,8 +35,9 @@ async function createReport(formData: FormData) {
   const now = new Date();
   const dateKey = now.toISOString().slice(0, 10); // YYYY-MM-DD
 
+  let report;
   try {
-    await prisma.report.create({
+    report = await prisma.report.create({
       data: {
         studentId,
         teacherId: teacher.id,
@@ -58,13 +60,19 @@ async function createReport(formData: FormData) {
 
   const attendanceText = attendanceValue === "PRESENT" ? "Присутствовал" : "Отсутствовал";
   const homeworkText =
-    homeworkValue === "DONE" ? "Выполнено полностью" :
-    homeworkValue === "PARTIAL" ? "Выполнено частично" : "Не выполнено";
+    homeworkValue === "DONE"
+      ? "Выполнено полностью"
+      : homeworkValue === "PARTIAL"
+      ? "Выполнено частично"
+      : "Не выполнено";
 
   const attendanceUz = attendanceValue === "PRESENT" ? "Darsda qatnashdi" : "Darsda qatnashmadi";
   const homeworkUz =
-    homeworkValue === "DONE" ? "To‘liq bajarilgan" :
-    homeworkValue === "PARTIAL" ? "Qisman bajarilgan" : "Bajarilmagan";
+    homeworkValue === "DONE"
+      ? "To‘liq bajarilgan"
+      : homeworkValue === "PARTIAL"
+      ? "Qisman bajarilgan"
+      : "Bajarilmagan";
 
   const message = `
 📚 ОТЧЁТ О ЗАНЯТИИ
@@ -92,18 +100,18 @@ Izoh:
 ${comment || "Izoh mavjud emas."}
 
 Yubordi: ${teacher.name}
-`;
+`.trim();
 
-  for (const parent of student.parents) {
-    if (parent.telegramId) {
-      // BigInt -> string
-      await sendTelegramMessage(parent.telegramId.toString(), message);
-    }
-  }
+  // ✅ единая централизованная доставка + лог + dedupe + retry-friendly
+  await sendTelegramToStudentParents(studentId, message, { type: "USER", id: teacher.id }, {
+    sourceType: "REPORT",
+    sourceId: report.id,
+    // можно включить HTML/MarkdownV2 позже, сейчас plain text
+    // parseMode: "HTML",
+  });
 
   revalidatePath("/teacher");
 }
-
 
 /* ================= PAGE ================= */
 
@@ -130,22 +138,13 @@ export default async function TeacherPage() {
 
   return (
     <div className="min-h-screen bg-gray-100 p-10">
-      <h1 className="text-2xl font-bold mb-8">
-        Teacher Panel
-      </h1>
+      <h1 className="text-2xl font-bold mb-8">Teacher Panel</h1>
 
-      {groups.length === 0 && (
-        <p>No groups assigned</p>
-      )}
+      {groups.length === 0 && <p>No groups assigned</p>}
 
       {groups.map((group) => (
-        <div
-          key={group.id}
-          className="bg-white rounded-2xl shadow p-6 mb-10"
-        >
-          <h2 className="font-semibold text-lg mb-4">
-            {group.name}
-          </h2>
+        <div key={group.id} className="bg-white rounded-2xl shadow p-6 mb-10">
+          <h2 className="font-semibold text-lg mb-4">{group.name}</h2>
 
           {group.students.map((student) => (
             <form
@@ -153,47 +152,20 @@ export default async function TeacherPage() {
               action={createReport}
               className="grid grid-cols-6 gap-4 items-center border-b py-3"
             >
-              <input
-                type="hidden"
-                name="studentId"
-                value={student.id}
-              />
-            
-              <input
-                type="hidden"
-                name="groupId"
-                value={group.id}
-              />
+              <input type="hidden" name="studentId" value={student.id} />
+              <input type="hidden" name="groupId" value={group.id} />
 
-              <div className="font-medium">
-                {student.name}
-              </div>
+              <div className="font-medium">{student.name}</div>
 
-              <select
-                name="attendance"
-                className="border p-2 rounded"
-              >
-                <option value="PRESENT">
-                  Present
-                </option>
-                <option value="ABSENT">
-                  Absent
-                </option>
+              <select name="attendance" className="border p-2 rounded">
+                <option value="PRESENT">Present</option>
+                <option value="ABSENT">Absent</option>
               </select>
 
-              <select
-                name="homework"
-                className="border p-2 rounded"
-              >
-                <option value="DONE">
-                  Done
-                </option>
-                <option value="PARTIAL">
-                  Partial
-                </option>
-                <option value="NOT_DONE">
-                  Not Done
-                </option>
+              <select name="homework" className="border p-2 rounded">
+                <option value="DONE">Done</option>
+                <option value="PARTIAL">Partial</option>
+                <option value="NOT_DONE">Not Done</option>
               </select>
 
               <input

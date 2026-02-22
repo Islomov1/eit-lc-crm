@@ -1,4 +1,3 @@
-// src/app/admin/timetable/page.tsx
 import React from "react";
 import { prisma } from "@/lib/prisma";
 import { GroupStatus } from "@prisma/client";
@@ -12,7 +11,7 @@ export default async function TimetablePage({
 }) {
   const sp = await searchParams;
 
-  const programFilter = typeof sp.program === "string" ? sp.program : undefined;
+  const programFilter = typeof sp.programId === "string" ? sp.programId : undefined;
 
   const statusFilter =
     typeof sp.status === "string" &&
@@ -20,7 +19,7 @@ export default async function TimetablePage({
       ? (sp.status as GroupStatus)
       : undefined;
 
-  const teacherFilter = typeof sp.teacher === "string" ? sp.teacher : undefined;
+  const teacherFilter = typeof sp.teacherId === "string" ? sp.teacherId : undefined;
 
   const groups = await prisma.group.findMany({
     where: {
@@ -33,7 +32,8 @@ export default async function TimetablePage({
       program: true,
       students: true,
     },
-    orderBy: { startTime: "asc" },
+    orderBy: [{ schedule: "asc" }, { startTime: "asc" }],
+    take: 300,
   });
 
   const programs = await prisma.program.findMany({
@@ -49,14 +49,9 @@ export default async function TimetablePage({
     <div className="space-y-10">
       <h1 className="text-2xl font-bold">Timetable</h1>
 
-      {/* FILTERS */}
       <div className="bg-white p-6 rounded-2xl shadow">
-        <form className="grid grid-cols-4 gap-4">
-          <select
-            name="program"
-            defaultValue={programFilter || ""}
-            className="border p-2 rounded"
-          >
+        <form method="GET" className="grid grid-cols-5 gap-4">
+          <select name="programId" defaultValue={programFilter || ""} className="border p-2 rounded">
             <option value="">All Programs</option>
             {programs.map((p) => (
               <option key={p.id} value={p.id}>
@@ -65,11 +60,7 @@ export default async function TimetablePage({
             ))}
           </select>
 
-          <select
-            name="teacher"
-            defaultValue={teacherFilter || ""}
-            className="border p-2 rounded"
-          >
+          <select name="teacherId" defaultValue={teacherFilter || ""} className="border p-2 rounded">
             <option value="">All Teachers</option>
             {teachers.map((t) => (
               <option key={t.id} value={t.id}>
@@ -78,11 +69,7 @@ export default async function TimetablePage({
             ))}
           </select>
 
-          <select
-            name="status"
-            defaultValue={statusFilter || ""}
-            className="border p-2 rounded"
-          >
+          <select name="status" defaultValue={statusFilter || ""} className="border p-2 rounded">
             <option value="">All Status</option>
             <option value="NEW">NEW</option>
             <option value="ACTIVE">ACTIVE</option>
@@ -90,13 +77,17 @@ export default async function TimetablePage({
             <option value="EXPIRED">EXPIRED</option>
           </select>
 
-          <button className="bg-black text-white rounded-lg py-2">
-            Apply Filters
-          </button>
+          <button className="bg-black text-white rounded-lg py-2">Apply Filters</button>
+
+          <a
+            href="/admin/timetable"
+            className="border rounded-lg py-2 flex items-center justify-center hover:bg-black hover:text-white transition"
+          >
+            Reset
+          </a>
         </form>
       </div>
 
-      {/* TABLE */}
       <div className="bg-white rounded-2xl shadow p-6">
         <table className="w-full text-sm">
           <thead>
@@ -127,9 +118,7 @@ export default async function TimetablePage({
                 <td>
                   {group.status === "NEW" && <Badge color="green">NEW</Badge>}
                   {group.status === "ACTIVE" && <Badge color="blue">ACTIVE</Badge>}
-                  {group.status === "FINISHING" && (
-                    <Badge color="orange">FINISHING</Badge>
-                  )}
+                  {group.status === "FINISHING" && <Badge color="orange">FINISHING</Badge>}
                   {group.status === "EXPIRED" && <Badge color="red">EXPIRED</Badge>}
                 </td>
               </tr>

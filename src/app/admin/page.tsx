@@ -1,75 +1,62 @@
 import { prisma } from "@/lib/prisma";
-import { revalidatePath } from "next/cache";
+import Link from "next/link";
+import { GroupStatus, ScheduleType, Prisma } from "@prisma/client";
 
-/* ================= CREATE GROUP ================= */
-
-async function createGroup(formData: FormData) {
-  "use server";
-
-  const name = formData.get("name")?.toString();
-  const schedule = formData.get("schedule")?.toString() as
-    | "MWF"
-    | "TTS";
-  const startTime = formData.get("startTime")?.toString();
-  const endTime = formData.get("endTime")?.toString();
-  const teacherId = formData.get("teacherId")?.toString();
-  const programId = formData.get("programId")?.toString();
-  const month = Number(formData.get("month"));
-
-  if (!name || !schedule || !startTime || !endTime || !programId) return;
-
-  await prisma.group.create({
-    data: {
-      name,
-      schedule,
-      startTime,
-      endTime,
-      teacherId: teacherId || null,
-      programId,
-      month: month || 1,
-      status: "ACTIVE",
-    },
-  });
-
-  revalidatePath("/admin/groups");
+function parseEnum<T extends Record<string, string>>(e: T, v?: string) {
+  if (!v) return undefined;
+  const values = Object.values(e) as string[];
+  return values.includes(v) ? (v as T[keyof T]) : undefined;
 }
 
-/* ================= PAGE ================= */
+type SP = Record<string, string | string[] | undefined>;
 
-export default async function AdminDashboard() {
+function spStr(v: string | string[] | undefined) {
+  return typeof v === "string" ? v : undefined;
+}
+
+export default async function AdminDashboard({
+  searchParams,
+}: {
+  searchParams: Promise<SP>;
+}) {
+  const sp = await searchParams;
+
+  const q = (spStr(sp.q) ?? "").trim();
+  const status = parseEnum(GroupStatus, spStr(sp.status));
+  const schedule = parseEnum(ScheduleType, spStr(sp.schedule));
+
+
   const totalStudents = await prisma.student.count();
-
-  const totalTeachers = await prisma.user.count({
-    where: { role: "TEACHER" },
-  });
-
-  const totalSupports = await prisma.user.count({
-    where: { role: "SUPPORT" },
-  });
-
+  const totalTeachers = await prisma.user.count({ where: { role: "TEACHER" } });
+  const totalSupports = await prisma.user.count({ where: { role: "SUPPORT" } });
   const totalReports = await prisma.report.count();
 
+const where: Prisma.GroupWhereInput = {
+  ...(status ? { status } : {}),
+  ...(schedule ? { schedule } : {}),
+  ...(q
+    ? {
+        OR: [
+          { name: { contains: q, mode: "insensitive" } },
+          { teacher: { is: { name: { contains: q, mode: "insensitive" } } } },
+          { program: { is: { name: { contains: q, mode: "insensitive" } } } },
+        ],
+      }
+    : {}),
+};
+
 const groups = await prisma.group.findMany({
-  include: {
-    teacher: true,
-    students: true,
-    program: true,
-  },
+  where,
+  include: { teacher: true, students: true, program: true },
   orderBy: { createdAt: "desc" },
+  take: 200,
 });
 
-  const teachers = await prisma.user.findMany({
-    where: { role: "TEACHER" },
-  });
 
   return (
     <div className="space-y-12">
+      <h1 className="text-3xl font-bold">Dashboard</h1>
 
-      <h1 className="text-3xl font-bold">
-        Dashboard
-      </h1>
-
-      {/* ===== Stats ===== */}
       <div className="grid grid-cols-4 gap-8">
         <StatCard title="Students" value={totalStudents} />
         <StatCard title="Teachers" value={totalTeachers} />
@@ -77,52 +64,44 @@ const groups = await prisma.group.findMany({
         <StatCard title="Reports" value={totalReports} />
       </div>
 
-      {/* ===== CREATE GROUP ===== */}
-      <div className="bg-white p-8 rounded-2xl shadow-md">
-        <h2 className="text-xl font-semibold mb-6">
-          Create Group
-        </h2>
+      {/* ===== GROUPS LIST + SEARCH ===== */}
+      <div className="bg-white p-8 rounded-2xl shadow-md space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-xl font-semibold">Groups</h2>
 
-        <form action={createGroup} className="flex gap-4">
-          <input
-            name="name"
-            placeholder="Group name"
-            required
-            className="border p-2 rounded w-64"
-          />
+          <form className="flex items-center gap-3">
+            <input
+              name="q"
+              defaultValue={q}
+              placeholder="Search groups / teacher / program"
+              className="border p-2 rounded w-80"
+            />
 
-          <select
-            name="teacherId"
-            className="border p-2 rounded"
-          >
-            <option value="">No teacher</option>
-            {teachers.map((teacher) => (
-              <option
-                key={teacher.id}
-                value={teacher.id}
-              >
-                {teacher.name}
-              </option>
-            ))}
-          </select>
+            <select name="status" defaultValue={status ?? ""} className="border p-2 rounded">
+              <option value="">All statuses</option>
+              <option value="NEW">NEW</option>
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="FINISHING">FINISHING</option>
+              <option value="EXPIRED">EXPIRED</option>
+            </select>
 
-          <button className="bg-black text-white px-6 rounded hover:opacity-80">
-            Add Group
-          </button>
-        </form>
-      </div>
+            <select name="schedule" defaultValue={schedule ?? ""} className="border p-2 rounded">
+              <option value="">All schedules</option>
+              <option value="MWF">MWF</option>
+              <option value="TTS">TTS</option>
+            </select>
 
-      {/* ===== GROUPS LIST ===== */}
-      <div className="bg-white p-8 rounded-2xl shadow-md">
-        <h2 className="text-xl font-semibold mb-6">
-          Groups
-        </h2>
+            <button className="bg-black text-white px-6 py-2 rounded hover:opacity-80">
+              Search
+            </button>
 
-        {groups.length === 0 && (
-          <p className="text-gray-500">
-            No groups created yet
-          </p>
-        )}
+            <Link href="/admin" className="text-sm text-gray-600 hover:underline">
+              Reset
+            </Link>
+          </form>
+        </div>
+
+        {groups.length === 0 && <p className="text-gray-500">No groups found</p>}
 
         <div className="space-y-4">
           {groups.map((group) => (
@@ -131,48 +110,32 @@ const groups = await prisma.group.findMany({
               className="border rounded-xl p-4 flex justify-between items-center"
             >
               <div>
-                <p className="font-semibold text-lg">
-                  {group.name}
-                </p>
+                <p className="font-semibold text-lg">{group.name}</p>
 
                 <p className="text-sm text-gray-500">
-                  Teacher:{" "}
-                  {group.teacher
-                    ? group.teacher.name
-                    : "Not assigned"}
+                  Teacher: {group.teacher ? group.teacher.name : "Not assigned"}
                 </p>
 
-                <p className="text-sm text-gray-500">
-                  Students: {group.students.length}
-                </p>
+                <p className="text-sm text-gray-500">Program: {group.program?.name ?? "-"}</p>
+                <p className="text-sm text-gray-500">Students: {group.students.length}</p>
+              </div>
+
+              <div className="text-sm text-gray-500">
+                {group.schedule} • {group.status}
               </div>
             </div>
           ))}
         </div>
       </div>
-
     </div>
   );
 }
 
-/* ================= CARD ================= */
-
-function StatCard({
-  title,
-  value,
-}: {
-  title: string;
-  value: number;
-}) {
+function StatCard({ title, value }: { title: string; value: number }) {
   return (
     <div className="bg-white p-8 rounded-2xl shadow-md hover:shadow-lg transition">
-      <h3 className="text-gray-500 text-sm uppercase tracking-wide">
-        {title}
-      </h3>
-
-      <p className="text-4xl font-bold mt-4 text-gray-900">
-        {value}
-      </p>
-      </div>
+      <h3 className="text-gray-500 text-sm uppercase tracking-wide">{title}</h3>
+      <p className="text-4xl font-bold mt-4 text-gray-900">{value}</p>
+    </div>
   );
 }

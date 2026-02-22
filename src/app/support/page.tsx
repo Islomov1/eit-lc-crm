@@ -5,8 +5,6 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import Image from "next/image";
-import { Prisma } from "@prisma/client";
-
 
 /* ================= CREATE SUPPORT SESSION ================= */
 
@@ -94,14 +92,15 @@ ${comment || "Izoh yo‘q."}
 Yubordi: ${support.name}
 `.trim();
 
-  await sendTelegramToStudentParents(studentId, msg, { type: "USER", id: support.id }, {
-    sourceType: "SUPPORT_SESSION",
-    sourceId: session.id,
-  });
+  await sendTelegramToStudentParents(
+    studentId,
+    msg,
+    { type: "USER", id: support.id },
+    { sourceType: "SUPPORT_SESSION", sourceId: session.id }
+  );
 
   revalidatePath("/support");
-};
-
+}
 
 /* ================= PAGE ================= */
 
@@ -119,23 +118,16 @@ export default async function SupportPage() {
     redirect("/");
   }
 
-const students: Prisma.StudentGetPayload<{}>[] =
-  await prisma.student.findMany({
+  const students = await prisma.student.findMany({
     orderBy: { name: "asc" },
   });
 
+  const sessions = await prisma.supportSession.findMany({
+    where: { supportId: support.id },
+    include: { student: true },
+    orderBy: { createdAt: "desc" },
+  });
 
-const sessions: Prisma.SupportSessionGetPayload<{
-  include: { student: true };
-}>[] 
-= await prisma.supportSession.findMany({
-  where: { supportId: support.id },
-  include: { student: true },
-  orderBy: { createdAt: "desc" },
-});
-
-
-  // CURRENT MONTH RANGE (strict)
   const now = new Date();
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
@@ -143,33 +135,23 @@ const sessions: Prisma.SupportSessionGetPayload<{
   const monthlySessions = await prisma.supportSession.findMany({
     where: {
       supportId: support.id,
-      startTime: {
-        gte: startOfMonth,
-        lt: endOfMonth,
-      },
+      startTime: { gte: startOfMonth, lt: endOfMonth },
     },
   });
 
-const totalMonthlyHours = monthlySessions.reduce((sum: number, session) => {
-  return (
-    sum +
-    (session.endTime.getTime() - session.startTime.getTime()) / (1000 * 60 * 60)
-  );
-}, 0);
-
+  const totalMonthlyHours = monthlySessions.reduce((sum, session) => {
+    return sum + (session.endTime.getTime() - session.startTime.getTime()) / (1000 * 60 * 60);
+  }, 0);
 
   return (
     <div className="min-h-screen bg-gray-100 p-10 space-y-10">
-      {/* HEADER */}
       <div className="flex items-center gap-3">
-        <Image src="/logo.png" alt="EIT LC CRM" width={40} height={40} />
         <div>
           <h1 className="text-2xl font-bold">Academic Support Panel</h1>
           <p className="text-sm text-gray-500">EIT LC CRM</p>
         </div>
       </div>
 
-      {/* CREATE SESSION */}
       <div className="bg-white p-6 rounded-2xl shadow space-y-4">
         <h2 className="font-semibold text-lg">Log Support Session</h2>
 
@@ -184,7 +166,6 @@ const totalMonthlyHours = monthlySessions.reduce((sum: number, session) => {
           </select>
 
           <input type="datetime-local" name="start" required className="border p-2 rounded" />
-
           <input type="datetime-local" name="end" required className="border p-2 rounded" />
 
           <input name="comment" placeholder="Comment" className="border p-2 rounded col-span-4" />
@@ -195,13 +176,11 @@ const totalMonthlyHours = monthlySessions.reduce((sum: number, session) => {
         </form>
       </div>
 
-      {/* MONTHLY SUMMARY */}
       <div className="bg-white p-6 rounded-2xl shadow">
         <h2 className="font-semibold text-lg mb-2">This Month Summary</h2>
         <p className="text-2xl font-bold">{totalMonthlyHours.toFixed(2)} hours</p>
       </div>
 
-      {/* SESSION LIST */}
       <div className="bg-white rounded-2xl shadow p-6">
         <h2 className="font-semibold mb-4">Your Sessions</h2>
 
@@ -218,8 +197,7 @@ const totalMonthlyHours = monthlySessions.reduce((sum: number, session) => {
           <tbody>
             {sessions.map((session) => {
               const hours =
-                (session.endTime.getTime() - session.startTime.getTime()) /
-                (1000 * 60 * 60);
+                (session.endTime.getTime() - session.startTime.getTime()) / (1000 * 60 * 60);
 
               return (
                 <tr key={session.id} className="border-b">
