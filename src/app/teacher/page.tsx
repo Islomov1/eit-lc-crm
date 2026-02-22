@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { AttendanceStatus, HomeworkStatus } from "@prisma/client";
 import { sendTelegramToStudentParents } from "@/lib/telegramDelivery";
+import { prisma } from "@/lib/prisma";
 
 /* ================= CREATE REPORT ================= */
 
