@@ -45,6 +45,7 @@ export default async function AdminLayout({
           <SidebarLink href="/admin/groups">Groups</SidebarLink>
           <SidebarLink href="/admin/students">Students</SidebarLink>
           <SidebarLink href="/admin/users">Users</SidebarLink>
+          <SidebarLink href="/admin/telegram-status">Telegram Status</SidebarLink>
         </nav>
 
         <div className="p-6 mt-auto">
