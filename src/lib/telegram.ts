@@ -1,77 +1,96 @@
 // src/lib/telegram.ts
+type InlineButton = {
+  text: string;
+  callback_data: string;
+};
 
-export type TelegramParseMode = "HTML" | "MarkdownV2";
+type ReplyKeyboardButton = {
+  text: string;
+  request_contact?: boolean;
+};
 
-export type TelegramSendResult =
-  | { ok: true; messageId: number }
-  | { ok: false; error: string; payload?: unknown; httpStatus?: number };
+async function telegramApi(method: string, body: Record<string, unknown>) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) {
+    throw new Error("TELEGRAM_BOT_TOKEN is missing");
+  }
 
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
+  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  const data = (await res.json().catch(() => null)) as
+    | { ok?: boolean; description?: string }
+    | null;
+
+  if (!res.ok || !data?.ok) {
+    throw new Error(
+      `Telegram API ${method} failed: ${res.status} ${data?.description ?? "Unknown error"}`
+    );
+  }
+
+  return data;
 }
 
-export async function sendTelegramMessage(
-  chatId: string | bigint,
+export async function sendTelegramMessage(chatId: string, text: string) {
+  return telegramApi("sendMessage", {
+    chat_id: chatId,
+    text,
+  });
+}
+
+export async function sendTelegramMessageWithInlineKeyboard(
+  chatId: string,
   text: string,
-  opts?: { parseMode?: TelegramParseMode }
-): Promise<TelegramSendResult> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return { ok: false, error: "Missing TELEGRAM_BOT_TOKEN" };
+  rows: InlineButton[][]
+) {
+  return telegramApi("sendMessage", {
+    chat_id: chatId,
+    text,
+    reply_markup: {
+      inline_keyboard: rows,
+    },
+  });
+}
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
+export async function sendTelegramContactRequestKeyboard(chatId: string, text: string) {
+  return telegramApi("sendMessage", {
+    chat_id: chatId,
+    text,
+    reply_markup: {
+      keyboard: [
+        [
+          {
+            text: "📱 Отправить номер / Raqamni yuborish",
+            request_contact: true,
+          } satisfies ReplyKeyboardButton,
+        ],
+      ],
+      resize_keyboard: true,
+      one_time_keyboard: true,
+    },
+  });
+}
 
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        chat_id: typeof chatId === "bigint" ? chatId.toString() : chatId,
-        text,
-        parse_mode: opts?.parseMode,
-        disable_web_page_preview: true,
-      }),
-    });
+export async function removeTelegramReplyKeyboard(chatId: string, text: string) {
+  return telegramApi("sendMessage", {
+    chat_id: chatId,
+    text,
+    reply_markup: {
+      remove_keyboard: true,
+    },
+  });
+}
 
-    const json: unknown = await res.json();
-
-    // Telegram responses are { ok: boolean, result?: {...}, description?: string }
-    const ok = isObject(json) && json["ok"] === true;
-    if (!res.ok || !ok) {
-      const description =
-        isObject(json) && typeof json["description"] === "string"
-          ? json["description"]
-          : `HTTP ${res.status}`;
-
-      return {
-        ok: false,
-        error: description,
-        payload: json,
-        httpStatus: res.status,
-      };
-    }
-
-    const result = isObject(json) ? json["result"] : null;
-    const messageIdRaw = isObject(result) ? result["message_id"] : null;
-
-    // Telegram message_id is a number in JSON
-    const messageId =
-      typeof messageIdRaw === "number"
-        ? messageIdRaw
-        : typeof messageIdRaw === "string"
-          ? Number(messageIdRaw)
-          : NaN;
-
-    if (!Number.isFinite(messageId)) {
-      return { ok: false, error: "Telegram response missing message_id", payload: json };
-    }
-
-    return { ok: true, messageId };
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : "Telegram fetch failed";
-    return { ok: false, error: msg };
-  } finally {
-    clearTimeout(timeout);
-  }
+export async function answerTelegramCallbackQuery(callbackQueryId: string, text?: string) {
+  return telegramApi("answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    text,
+    show_alert: false,
+  });
 }

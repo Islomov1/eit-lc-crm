@@ -79,32 +79,50 @@ model Group {
 }
 
 model Student {
-  id                 String             @id @default(uuid())
+  id                 String               @id @default(uuid())
   name               String
-  createdAt          DateTime           @default(now())
+  createdAt          DateTime             @default(now())
   groupId            String?
   parents            Parent[]
   ParentInvite       ParentInvite[]
   reports            Report[]
-  group              Group?             @relation(fields: [groupId], references: [id])
+  group              Group?               @relation(fields: [groupId], references: [id])
   supportSessions    SupportSession[]
   telegramDeliveries TelegramDelivery[]
+  telegramPendingLinks TelegramPendingLink[]
 }
 
 model Parent {
-  id                 String             @id @default(uuid())
+  id                 String               @id @default(uuid())
   name               String
   phone              String
-  telegramId         BigInt?            @unique
-  createdAt          DateTime           @default(now())
+  telegramId         BigInt?              @unique
+  createdAt          DateTime             @default(now())
   studentId          String
-  student            Student            @relation(fields: [studentId], references: [id])
-  invites            ParentInvite[]     @relation("InvitesUsedByParent")
+  student            Student              @relation(fields: [studentId], references: [id])
+  invites            ParentInvite[]       @relation("InvitesUsedByParent")
   telegramDeliveries TelegramDelivery[]
+  telegramPendingLinks TelegramPendingLink[]
 
   @@index([studentId])
 }
+model TelegramPendingLink {
+  id        String   @id @default(uuid())
+  chatId    BigInt   @unique
+  parentId  String
+  studentId String
+  status    String   @default("PENDING") // PENDING | CONFIRMED | REJECTED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  expiresAt DateTime?
 
+  parent    Parent   @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([parentId])
+  @@index([studentId])
+  @@index([status])
+}
 model Report {
   id         String           @id @default(uuid())
   date       DateTime         @default(now())
