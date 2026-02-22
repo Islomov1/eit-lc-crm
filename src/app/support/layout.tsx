@@ -3,6 +3,9 @@ import Image from "next/image";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import LogoutButton from "@/components/Logoutbutton";
+
+export const dynamic = "force-dynamic";
 
 export default async function SupportLayout({
   children,
@@ -24,10 +27,8 @@ export default async function SupportLayout({
 
   return (
     <div className="min-h-screen flex bg-gray-100">
-
       {/* SIDEBAR */}
       <aside className="w-72 bg-white flex flex-col shadow-lg">
-
         {/* LOGO */}
         <div className="px-6 py-8">
           <Image
@@ -42,42 +43,17 @@ export default async function SupportLayout({
 
         {/* NAVIGATION */}
         <nav className="flex-1 px-4 space-y-2 text-sm font-medium">
-
-          <SidebarLink href="/support">
-            Support Sessions
-          </SidebarLink>
-
+          <SidebarLink href="/support">Support Sessions</SidebarLink>
         </nav>
 
         {/* LOGOUT */}
         <div className="p-6 mt-auto">
-          <form action="/api/logout" method="POST">
-            <button
-              className="
-                w-full
-                flex items-center justify-center gap-2
-                py-4
-                rounded-2xl
-                bg-red-600
-                text-white
-                font-semibold
-                hover:bg-red-700
-                transition
-                shadow-md
-              "
-            >
-              Logout
-            </button>
-          </form>
+          <LogoutButton />
         </div>
-
       </aside>
 
       {/* MAIN */}
-      <main className="flex-1 p-12">
-        {children}
-      </main>
-
+      <main className="flex-1 p-12">{children}</main>
     </div>
   );
 }

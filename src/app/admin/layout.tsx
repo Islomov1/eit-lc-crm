@@ -3,6 +3,9 @@ import Image from "next/image";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import LogoutButton from "@/components/Logoutbutton";
+
+export const dynamic = "force-dynamic";
 
 export default async function AdminLayout({
   children,
@@ -45,13 +48,7 @@ export default async function AdminLayout({
         </nav>
 
         <div className="p-6 mt-auto">
-          <form action="/api/logout" method="POST">
-            <button
-              className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-red-600 text-white font-semibold hover:bg-red-700 transition shadow-md"
-            >
-              Logout
-            </button>
-          </form>
+          <LogoutButton />
         </div>
       </aside>
 
