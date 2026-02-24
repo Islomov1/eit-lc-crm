@@ -19,6 +19,7 @@ model User {
   parentInvites   ParentInvite[]   @relation("InvitesCreatedByUser")
   reports         Report[]         @relation("TeacherReports")
   supportSessions SupportSession[] @relation("SupportUser")
+  payments Payment[]
 }
 
 model TelegramUpdate {
@@ -76,6 +77,7 @@ model Group {
   teacher   User?        @relation("TeacherGroups", fields: [teacherId], references: [id])
   reports   Report[]
   students  Student[]
+  payments  Payment[]
 }
 
 model Student {
@@ -84,6 +86,7 @@ model Student {
   createdAt          DateTime             @default(now())
   groupId            String?
   parents            Parent[]
+  payments           Payment[]
   ParentInvite       ParentInvite[]
   reports            Report[]
   group              Group?               @relation(fields: [groupId], references: [id])
@@ -190,6 +193,41 @@ model TelegramDelivery {
   @@index([parentId, createdAt])
 }
 
+model Payment {
+  id        String         @id @default(uuid())
+
+  studentId String
+  student   Student        @relation(fields: [studentId], references: [id])
+
+  // snapshot for reporting
+  teacherId String?
+  teacher   User?          @relation(fields: [teacherId], references: [id])
+
+  groupId   String?
+  group     Group?         @relation(fields: [groupId], references: [id])
+
+  // month coverage window: [periodStart, periodEnd)
+  periodStart DateTime
+  periodEnd   DateTime
+
+  classesIncluded Int      @default(12)
+
+  amount     Int           // UZS as int
+  status     PaymentStatus @default(PAID)
+  method     PaymentMethod
+
+  paidAt     DateTime      @default(now())
+  note       String?
+
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@unique([studentId, periodStart])
+  @@index([teacherId, periodStart])
+  @@index([studentId, periodStart])
+  @@index([periodStart, periodEnd])
+}
+
 enum Role {
   ADMIN
   TEACHER
@@ -237,4 +275,20 @@ enum TelegramDeliveryStatus {
   PENDING
   SENT
   FAILED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  CLICK
+  PAYME
+  OTHER
+}
+
+enum PaymentStatus {
+  PAID
+  PARTIAL
+  REFUND
+  VOID
 }

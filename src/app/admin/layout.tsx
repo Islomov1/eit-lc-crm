@@ -1,9 +1,9 @@
-import Link from "next/link";
 import Image from "next/image";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import LogoutButton from "@/components/Logoutbutton";
+import AdminSidebarNav from "@/components/AdminSidebarNav";
 
 export const dynamic = "force-dynamic";
 
@@ -27,50 +27,27 @@ export default async function AdminLayout({
 
   return (
     <div className="min-h-screen flex bg-gray-100">
-      <aside className="w-72 bg-white flex flex-col shadow-lg">
-        <div className="px-6 py-8">
-          <Image
-            src="/logo.png"
-            alt="EIT LC CRM"
-            width={180}
-            height={60}
-            className="object-contain"
-            priority
-          />
-        </div>
+      <aside className="w-72 bg-white shadow-lg h-screen sticky top-0 relative">
+  <div className="px-6 py-8">
+    <Image
+      src="/logo.png"
+      alt="EIT LC CRM"
+      width={180}
+      height={60}
+      className="object-contain"
+      priority
+    />
+  </div>
 
-        <nav className="flex-1 px-4 space-y-2 text-sm font-medium">
-          <SidebarLink href="/admin">Dashboard</SidebarLink>
-          <SidebarLink href="/admin/timetable">Timetable</SidebarLink>
-          <SidebarLink href="/admin/groups">Groups</SidebarLink>
-          <SidebarLink href="/admin/students">Students</SidebarLink>
-          <SidebarLink href="/admin/users">Users</SidebarLink>
-          <SidebarLink href="/admin/telegram-status">Telegram Status</SidebarLink>
-        </nav>
+  <AdminSidebarNav />
 
-        <div className="p-6 mt-auto">
-          <LogoutButton />
-        </div>
-      </aside>
+  <div className="absolute bottom-0 left-0 right-0 p-6 bg-white">
+    <LogoutButton />
+  </div>
+</aside>
 
       <main className="flex-1 p-12">{children}</main>
     </div>
   );
 }
 
-function SidebarLink({
-  href,
-  children,
-}: {
-  href: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className="block px-4 py-3 rounded-xl text-gray-700 hover:bg-gray-100 hover:text-black transition"
-    >
-      {children}
-    </Link>
-  );
-}
