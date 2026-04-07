@@ -6,34 +6,24 @@ import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
     if (loading) return;
-
     setError("");
     setLoading(true);
-
     try {
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-
       const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        setError(data?.error || "Login failed");
-        return;
-      }
-
+      if (!res.ok) { setError(data?.error || "Login failed"); return; }
       const role = data?.user?.role;
       if (role === "ADMIN") router.push("/admin");
       else if (role === "TEACHER") router.push("/teacher");
@@ -51,122 +41,191 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen relative bg-linear-to-br from-white via-sky-50 to-sky-200">
-      {/* soft background blobs */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -top-24 -left-24 h-80 w-80 rounded-full bg-sky-300/30 blur-3xl" />
-        <div className="absolute top-24 -right-24 h-96 w-96 rounded-full bg-blue-300/25 blur-3xl" />
-        <div className="absolute -bottom-28 left-1/3 h-112 w-md rounded-full bg-sky-400/20 blur-3xl" />
-      </div>
+    <div className="min-h-screen bg-white flex flex-col">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
+        * { font-family: 'DM Sans', sans-serif; }
+
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(16px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .fade-1 { animation: fadeUp 0.5s ease both 0.05s; opacity: 0; }
+        .fade-2 { animation: fadeUp 0.5s ease both 0.15s; opacity: 0; }
+        .fade-3 { animation: fadeUp 0.5s ease both 0.25s; opacity: 0; }
+        .fade-4 { animation: fadeUp 0.5s ease both 0.35s; opacity: 0; }
+        .fade-5 { animation: fadeUp 0.5s ease both 0.45s; opacity: 0; }
+
+        .crm-input {
+          width: 100%;
+          height: 52px;
+          background: #f8f9fb;
+          border: 1.5px solid #e8eaee;
+          border-radius: 14px;
+          padding: 0 16px;
+          font-size: 14px;
+          color: #111;
+          outline: none;
+          transition: all 0.2s ease;
+          font-family: 'DM Sans', sans-serif;
+        }
+        .crm-input::placeholder { color: #adb3bf; }
+        .crm-input:focus {
+          border-color: #173662;
+          background: #fff;
+          box-shadow: 0 0 0 4px rgba(23,54,98,0.07);
+        }
+
+        .crm-btn {
+          width: 100%;
+          height: 52px;
+          background: #173662;
+          border: none;
+          border-radius: 14px;
+          color: white;
+          font-size: 15px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.25s ease;
+          letter-spacing: 0.2px;
+          font-family: 'DM Sans', sans-serif;
+          position: relative;
+          overflow: hidden;
+        }
+        .crm-btn::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 60%);
+        }
+        .crm-btn:hover:not(:disabled) {
+          background: #1e4a7a;
+          transform: translateY(-1px);
+          box-shadow: 0 8px 28px rgba(23,54,98,0.28);
+        }
+        .crm-btn:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
+        .crm-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+        .show-btn {
+          position: absolute;
+          right: 14px;
+          top: 50%;
+          transform: translateY(-50%);
+          background: none;
+          border: none;
+          font-size: 11px;
+          font-weight: 700;
+          color: #adb3bf;
+          cursor: pointer;
+          letter-spacing: 0.06em;
+          transition: color 0.15s;
+          font-family: 'DM Sans', sans-serif;
+        }
+        .show-btn:hover { color: #173662; }
+      `}</style>
 
       {/* Top bar */}
-      <header className="relative z-10 h-16 w-full bg-white/40 backdrop-blur-xl">
-        <div className="mx-auto max-w-6xl h-full px-4 flex items-center">
-          {/* left logo */}
-          <Image
-            src="/logo.png"
-            alt="EIT"
-            width={180}
-            height={60}
-            priority
-            quality={100}
-          />
-
-          {/* centered title */}
-          <div className="flex-1 text-center">
-            <h1 className="text-sm sm:text-base font-semibold tracking-tight text-black">
-              EIT LC CRM
-            </h1>
-          </div>
-
-          {/* spacer */}
-          <div className="width-120px" />
-        </div>
+      <header className="fade-1 w-full bg-white h-16 flex items-center px-8 justify-between"
+        style={{ borderBottom: "1px solid rgba(23,54,98,0.07)" }}>
+        <Image src="/logo.png" alt="EIT LC" width={160} height={54} priority quality={100} className="object-contain" />
+        <span style={{ fontSize: "14px", fontWeight: 600, color: "#1a2d4a", letterSpacing: "-0.01em" }}>EIT LC CRM</span>
+        <div style={{ width: 160 }} />
       </header>
 
       {/* Main */}
-      <main className="relative z-10 flex items-center justify-center px-4">
-        <div className="w-full max-w-md mt-16">
-          <div className="rounded-3xl bg-white/70 backdrop-blur-xl shadow-[0_40px_100px_-40px_rgba(0,0,0,0.35)] transition">
-            <div className="p-8 sm:p-10">
-              <p className="text-center text-sm text-slate-600">
-                Sign in to continue
-              </p>
+      <main
+        className="flex-1 flex flex-col items-center justify-center px-4 py-16 relative"
+        style={{ background: "linear-gradient(160deg, #ffffff 0%, #f2f6fb 60%, #e8eef7 100%)" }}
+      >
+        {/* Decorative blobs */}
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: "-100px", right: "-100px", width: "500px", height: "500px", borderRadius: "50%", background: "radial-gradient(circle, rgba(23,54,98,0.05) 0%, transparent 70%)" }} />
+          <div style={{ position: "absolute", bottom: "-80px", left: "-80px", width: "400px", height: "400px", borderRadius: "50%", background: "radial-gradient(circle, rgba(184,150,46,0.05) 0%, transparent 70%)" }} />
+        </div>
 
-              <div className="mt-8 space-y-5">
-                {/* Email */}
-                <div>
-                  <label className="block text-sm text-slate-700 mb-2">
-                    Email
-                  </label>
+        {/* Card */}
+        <div className="fade-2 relative z-10 w-full max-w-md">
+          <div style={{
+            background: "rgba(255,255,255,0.9)",
+            backdropFilter: "blur(24px)",
+            borderRadius: "28px",
+            padding: "48px 44px",
+            boxShadow: "0 2px 4px rgba(0,0,0,0.02), 0 24px 64px rgba(23,54,98,0.1), 0 0 0 1px rgba(23,54,98,0.05)",
+          }}>
+
+            <div className="fade-3 text-center mb-8">
+              <p style={{ fontSize: "15px", color: "#6b7280" }}>Sign in to continue</p>
+            </div>
+
+            <div className="space-y-5">
+
+              {/* Email */}
+              <div className="fade-3">
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "8px" }}>
+                  Email
+                </label>
+                <input
+                  type="email"
+                  className="crm-input"
+                  placeholder="name@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={onKeyDown}
+                />
+              </div>
+
+              {/* Password */}
+              <div className="fade-4">
+                <label style={{ display: "block", fontSize: "12px", fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "8px" }}>
+                  Password
+                </label>
+                <div style={{ position: "relative" }}>
                   <input
-                    type="email"
-                    className="w-full px-4 py-3 rounded-2xl border border-black/80 bg-white text-black placeholder-slate-400 focus:outline-none focus:ring-4 focus:ring-black/10 focus:border-black transition"
-                    placeholder="name@example.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    type={showPassword ? "text" : "password"}
+                    className="crm-input"
+                    style={{ paddingRight: "60px" }}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
                     onKeyDown={onKeyDown}
                   />
+                  <button type="button" className="show-btn" onClick={() => setShowPassword((v) => !v)}>
+                    {showPassword ? "HIDE" : "SHOW"}
+                  </button>
                 </div>
+              </div>
 
-                {/* Password */}
-                <div>
-                  <label className="block text-sm text-slate-700 mb-2">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      className="w-full px-4 py-3 pr-14 rounded-2xl border border-black/80 bg-white text-black placeholder-slate-400 focus:outline-none focus:ring-4 focus:ring-black/10 focus:border-black transition"
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      onKeyDown={onKeyDown}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((v) => !v)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-black/70 hover:text-black transition"
-                    >
-                      {showPassword ? "HIDE" : "SHOW"}
-                    </button>
-                  </div>
+              {/* Error */}
+              {error && (
+                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "12px", padding: "12px 16px", fontSize: "13px", color: "#dc2626" }}>
+                  {error}
                 </div>
+              )}
 
-                {/* Error */}
-                {error && (
-                  <div className="rounded-xl bg-red-100 text-red-700 px-4 py-3 text-sm">
-                    {error}
-                  </div>
-                )}
-
-                {/* Button */}
-                <button
-                  onClick={handleLogin}
-                  disabled={loading}
-                  className="w-full py-3 rounded-2xl bg-black text-white font-semibold hover:bg-black/85 active:scale-[0.99] transition disabled:opacity-60"
-                >
+              {/* Button */}
+              <div className="fade-5" style={{ paddingTop: "4px" }}>
+                <button className="crm-btn" onClick={handleLogin} disabled={loading}>
                   {loading ? (
-                    <span className="inline-flex items-center gap-2">
-                      <span className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ width: "16px", height: "16px", borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "white", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
                       Logging in…
                     </span>
-                  ) : (
-                    "Login"
-                  )}
+                  ) : "Login"}
                 </button>
-
-                <p className="text-center text-xs text-slate-500">
-                  Internal use only
-                </p>
               </div>
+
+              <p className="fade-5 text-center" style={{ fontSize: "12px", color: "#9ca3af", paddingTop: "2px" }}>
+                Internal use only
+              </p>
             </div>
           </div>
-
-          <p className="text-center text-xs text-slate-600 mt-6">
-            © {new Date().getFullYear()} EIT LC
-          </p>
         </div>
+
+        <p className="fade-5 relative z-10 text-center text-xs mt-6" style={{ color: "#9ca3af" }}>
+          © {new Date().getFullYear()} EIT LC
+        </p>
       </main>
     </div>
   );

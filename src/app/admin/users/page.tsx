@@ -3,14 +3,37 @@ import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
 import type { Prisma } from "@prisma/client";
 
-/* ================= UPDATE USER ================= */
+/* ================= SERVER ACTIONS ================= */
+
+async function createUser(formData: FormData) {
+  "use server";
+
+  const name = formData.get("name")?.toString().trim();
+  const email = formData.get("email")?.toString().trim();
+  const password = formData.get("password")?.toString();
+  const role = formData.get("role")?.toString() as "ADMIN" | "TEACHER" | "SUPPORT";
+
+  if (!name || !email || !password || !role) return;
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  try {
+    await prisma.user.create({
+      data: { name, email, password: hashedPassword, role },
+    });
+  } catch (e) {
+    console.error("CREATE_USER_ERROR:", e);
+  }
+
+  revalidatePath("/admin/users");
+}
 
 async function updateUser(formData: FormData) {
   "use server";
 
   const id = formData.get("id")?.toString();
-  const name = formData.get("name")?.toString();
-  const email = formData.get("email")?.toString();
+  const name = formData.get("name")?.toString().trim();
+  const email = formData.get("email")?.toString().trim();
   const role = formData.get("role")?.toString() as "ADMIN" | "TEACHER" | "SUPPORT";
   const password = formData.get("password")?.toString();
 
@@ -31,15 +54,12 @@ async function updateUser(formData: FormData) {
   revalidatePath("/admin/users");
 }
 
-/* ================= DELETE USER ================= */
-
 async function deleteUser(formData: FormData) {
   "use server";
 
   const id = formData.get("id")?.toString();
   if (!id) return;
 
-  // Block delete if referenced (safe for now)
   const [groups, reports, sessions, invites] = await Promise.all([
     prisma.group.count({ where: { teacherId: id } }),
     prisma.report.count({ where: { teacherId: id } }),
@@ -48,7 +68,7 @@ async function deleteUser(formData: FormData) {
   ]);
 
   if (groups > 0 || reports > 0 || sessions > 0 || invites > 0) {
-    console.error("DELETE_USER_BLOCKED_REFERENCES", { id, groups, reports, sessions, invites });
+    console.error("DELETE_USER_BLOCKED", { id, groups, reports, sessions, invites });
     return;
   }
 
@@ -61,30 +81,13 @@ async function deleteUser(formData: FormData) {
   revalidatePath("/admin/users");
 }
 
-/* ================= CREATE USER ================= */
+/* ================= HELPERS ================= */
 
-async function createUser(formData: FormData) {
-  "use server";
-
-  const name = formData.get("name")?.toString();
-  const email = formData.get("email")?.toString();
-  const password = formData.get("password")?.toString();
-  const role = formData.get("role")?.toString() as "ADMIN" | "TEACHER" | "SUPPORT";
-
-  if (!name || !email || !password || !role) return;
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  try {
-    await prisma.user.create({
-      data: { name, email, password: hashedPassword, role },
-    });
-  } catch (e) {
-    console.error("CREATE_USER_ERROR:", e);
-  }
-
-  revalidatePath("/admin/users");
-}
+const ROLE_COLORS: Record<string, string> = {
+  ADMIN: "bg-purple-100 text-purple-700",
+  TEACHER: "bg-blue-100 text-blue-700",
+  SUPPORT: "bg-green-100 text-green-700",
+};
 
 /* ================= PAGE ================= */
 
@@ -93,120 +96,179 @@ export default async function UsersPage() {
     orderBy: { createdAt: "desc" },
   });
 
+  const admins = users.filter((u) => u.role === "ADMIN");
+  const teachers = users.filter((u) => u.role === "TEACHER");
+  const supports = users.filter((u) => u.role === "SUPPORT");
+
   return (
-    <div className="space-y-10">
-      <h1 className="text-2xl font-bold">Users</h1>
+    <div className="space-y-10 max-w-5xl">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Users</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          {users.length} total · {admins.length} admin · {teachers.length} teacher · {supports.length} support
+        </p>
+      </div>
 
-      <div className="bg-white p-6 rounded-2xl shadow space-y-4">
-        <h2 className="font-semibold text-lg">Create User</h2>
+      {/* ===== CREATE USER ===== */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
+        <h2 className="font-semibold text-gray-900">Create New User</h2>
 
-        <form action={createUser} className="grid grid-cols-4 gap-4">
-          <input name="name" placeholder="Name" required className="border p-2 rounded" />
-          <input name="email" placeholder="Email" required className="border p-2 rounded" />
-          <input
-            name="password"
-            type="password"
-            placeholder="Password"
-            required
-            className="border p-2 rounded"
-          />
+        <form action={createUser} className="grid grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Full Name</label>
+            <input
+              name="name"
+              placeholder="e.g. Jasmine Sultonova"
+              required
+              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+            />
+          </div>
 
-          <select name="role" required className="border p-2 rounded">
-            <option value="TEACHER">Teacher</option>
-            <option value="SUPPORT">Support</option>
-            <option value="ADMIN">Admin</option>
-          </select>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Email</label>
+            <input
+              name="email"
+              type="email"
+              placeholder="email@eitlc.uz"
+              required
+              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+            />
+          </div>
 
-          <button className="col-span-4 bg-black text-white py-2 rounded-lg hover:opacity-80">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Password</label>
+            <input
+              name="password"
+              type="password"
+              placeholder="Minimum 8 characters"
+              required
+              minLength={8}
+              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Role</label>
+            <select
+              name="role"
+              required
+              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+            >
+              <option value="TEACHER">Teacher</option>
+              <option value="SUPPORT">Support</option>
+              <option value="ADMIN">Admin</option>
+            </select>
+          </div>
+
+          <button className="col-span-2 h-11 bg-gray-900 text-white rounded-xl font-semibold text-sm hover:bg-gray-700 active:scale-[0.99] transition">
             Create User
           </button>
         </form>
       </div>
 
-      <div className="bg-white rounded-2xl shadow p-6">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b text-left">
-              <th className="pb-3">Name</th>
-              <th className="pb-3">Email</th>
-              <th className="pb-3">Role</th>
-              <th className="pb-3">Actions</th>
-            </tr>
-          </thead>
+      {/* ===== USERS TABLE ===== */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">All Users</h2>
+        </div>
 
-          <tbody>
+        {users.length === 0 ? (
+          <div className="p-6 text-sm text-gray-500">No users yet.</div>
+        ) : (
+          <div className="divide-y divide-gray-50">
             {users.map((user) => (
-              <tr key={user.id} className="border-b hover:bg-gray-50">
-                <td className="py-3">
-                  <form action={updateUser} className="flex items-center gap-3">
-                    <input type="hidden" name="id" value={user.id} />
+              <div key={user.id} className="px-6 py-5">
+                {/* User header */}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-9 h-9 rounded-full bg-gray-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
+                    {user.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900 text-sm">{user.name}</p>
+                    <p className="text-xs text-gray-500">{user.email}</p>
+                  </div>
+                  <span className={`ml-auto text-xs font-semibold px-3 py-1 rounded-full ${ROLE_COLORS[user.role]}`}>
+                    {user.role}
+                  </span>
+                </div>
+
+                {/* Single update form — all fields together */}
+                <form action={updateUser} className="grid grid-cols-2 gap-3">
+                  <input type="hidden" name="id" value={user.id} />
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-400">Name</label>
                     <input
                       name="name"
                       defaultValue={user.name}
-                      className="border p-1 rounded text-sm"
+                      required
+                      className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
                     />
-                    {/* keep the rest in other cells */}
-                  </form>
-                </td>
+                  </div>
 
-                <td>
-                  <form action={updateUser} className="flex items-center gap-3">
-                    <input type="hidden" name="id" value={user.id} />
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-400">Email</label>
                     <input
                       name="email"
                       defaultValue={user.email}
-                      className="border p-1 rounded text-sm"
+                      required
+                      className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
                     />
-                    {/* hidden fields will be added below via a single form approach */}
-                  </form>
-                </td>
+                  </div>
 
-                <td>
-                  <form action={updateUser} className="flex items-center gap-3">
-                    <input type="hidden" name="id" value={user.id} />
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-400">Role</label>
                     <select
                       name="role"
                       defaultValue={user.role}
-                      className="border p-1 rounded text-sm"
+                      className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
                     >
                       <option value="ADMIN">Admin</option>
                       <option value="TEACHER">Teacher</option>
                       <option value="SUPPORT">Support</option>
                     </select>
-                  </form>
-                </td>
-
-                <td className="py-3">
-                  {/* One proper form for update + delete */}
-                  <div className="flex items-center gap-4">
-                    <form action={updateUser} className="flex items-center gap-2">
-                      <input type="hidden" name="id" value={user.id} />
-                      <input type="hidden" name="name" value={user.name} />
-                      <input type="hidden" name="email" value={user.email} />
-                      <input type="hidden" name="role" value={user.role} />
-
-                      <input
-                        name="password"
-                        placeholder="New password (optional)"
-                        className="border p-1 rounded text-sm"
-                      />
-                      <button className="text-blue-600 text-sm hover:underline">Save</button>
-                    </form>
-
-                    <form action={deleteUser}>
-                      <input type="hidden" name="id" value={user.id} />
-                      <button className="text-red-500 hover:underline text-sm">Delete</button>
-                    </form>
                   </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
 
-        <p className="text-xs text-gray-500 mt-4">
-          Note: User delete is blocked if the user is linked to groups/reports/support sessions/invites.
-        </p>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-400">
+                      New Password <span className="text-gray-300">(leave blank to keep)</span>
+                    </label>
+                    <input
+                      name="password"
+                      type="password"
+                      placeholder="••••••••"
+                      className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                    />
+                  </div>
+
+                 {/* Buttons */}
+<div className="col-span-2 flex items-center justify-between pt-1">
+  <button
+    type="submit"
+    className="h-9 px-5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] transition"
+  >
+    Save Changes
+  </button>
+
+  <button
+    type="submit"
+    formAction={deleteUser}
+    className="h-9 px-5 rounded-xl border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 active:scale-[0.99] transition"
+  >
+    Delete User
+  </button>
+</div>
+</form>
+</div>
+        ))}
+          </div>
+        )}
+
+        <div className="px-6 py-3 bg-gray-50 border-t border-gray-100">
+          <p className="text-xs text-gray-400">
+            Delete is blocked if the user is linked to groups, reports, support sessions, or invites.
+          </p>
+        </div>
       </div>
     </div>
   );

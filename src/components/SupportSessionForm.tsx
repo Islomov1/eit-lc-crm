@@ -17,186 +17,208 @@ const DURATION_OPTIONS = [15, 20, 30, 45, 60, 90, 120];
 
 const COMMENT_TEMPLATES = [
   {
-    key: "hw_explained",
-    ru: "Разобрали домашнее задание, объяснили ошибки и правильные ответы.",
-    uz: "Uy vazifasi tahlil qilindi, xatolar tushuntirildi va to‘g‘ri javoblar ko‘rsatildi.",
+    key: "hw",
+    label: "Домашка / Uy vazifasi",
+    ru: "Разобрали домашнее задание: исправили ошибки, объяснили правильные ответы.",
+    uz: "Uy vazifasi ko'rib chiqildi: xatolar tuzatildi, to'g'ri javoblar tushuntirildi.",
   },
   {
-    key: "revision_done",
-    ru: "Провели повторение пройденных тем и закрепили материал.",
-    uz: "O‘tilgan mavzular takrorlandi va material mustahkamlandi.",
+    key: "revision",
+    label: "Повторение / Takrorlash",
+    ru: "Повторили пройденный материал, закрепили грамматику и лексику.",
+    uz: "O'tilgan mavzu takrorlandi, grammatika va leksika mustahkamlandi.",
   },
   {
-    key: "speaking_practice",
+    key: "speaking",
+    label: "Speaking practice",
     ru: "Провели speaking practice: ответы на вопросы, исправление ошибок, развитие беглости.",
     uz: "Speaking practice qilindi: savollarga javob, xatolarni tuzatish, ravonlikni rivojlantirish.",
   },
   {
-    key: "missed_topics",
-    ru: "Закрыли пропущенные темы и объяснили ключевые моменты урока.",
-    uz: "Qoldirilgan mavzular yopildi va darsning asosiy nuqtalari tushuntirildi.",
+    key: "writing",
+    label: "Writing practice",
+    ru: "Работали над writing: структура эссе, аргументация, лексика и грамматика.",
+    uz: "Writing ustida ishlandi: esse tuzilishi, argumentatsiya, leksika va grammatika.",
   },
   {
-    key: "exam_support",
-    ru: "Подготовка к тесту/экзамену: повторение, практика заданий, работа над ошибками.",
-    uz: "Test/imtihonga tayyorgarlik: takrorlash, topshiriqlar amaliyoti, xatolar ustida ishlash.",
+    key: "reading",
+    label: "Reading / Reading",
+    ru: "Разобрали reading задания: стратегии поиска ответов, работа со временем.",
+    uz: "Reading topshiriqlari ko'rib chiqildi: javob qidirish strategiyalari, vaqt boshqaruvi.",
   },
   {
-    key: "parent_contacted",
-    ru: "Родителю передана обратная связь по прогрессу и рекомендациям.",
-    uz: "Ota-onaga o‘quvchi progressi va tavsiyalar bo‘yicha fikr bildirildi.",
+    key: "listening",
+    label: "Listening / Listening",
+    ru: "Провели listening практику: разбор заданий, работа с транскриптом.",
+    uz: "Listening amaliyoti o'tkazildi: topshiriqlarni tahlil qilish, transkript bilan ishlash.",
+  },
+  {
+    key: "missed",
+    label: "Пропущенные темы / Qoldirilgan mavzu",
+    ru: "Закрыли пропущенные темы, объяснили ключевые моменты урока.",
+    uz: "Qoldirilgan mavzular yopildi, darsning asosiy nuqtalari tushuntirildi.",
+  },
+  {
+    key: "exam",
+    label: "Подготовка / Tayyorgarlik",
+    ru: "Подготовка к экзамену: повторение, практика заданий, стратегия и управление временем.",
+    uz: "Imtihonga tayyorgarlik: takrorlash, topshiriqlar amaliyoti, strategiya va vaqtni boshqarish.",
+  },
+  {
+    key: "mock",
+    label: "Mock exam / Mock imtihon",
+    ru: "Провели пробный экзамен в условиях реального теста. Разобрали ошибки.",
+    uz: "Haqiqiy test sharoitida sinov imtihoni o'tkazildi. Xatolar tahlil qilindi.",
+  },
+  {
+    key: "vocab",
+    label: "Vocabulary / Leksika",
+    ru: "Работали над лексикой: новые слова, фразы, контекстное употребление.",
+    uz: "Leksika ustida ishlandi: yangi so'zlar, iboralar, kontekstda qo'llash.",
+  },
+  {
+    key: "grammar",
+    label: "Grammar / Grammatika",
+    ru: "Проработали грамматическую тему, выполнили упражнения на закрепление.",
+    uz: "Grammatika mavzusi o'rganildi, mustahkamlash mashqlari bajarildi.",
+  },
+  {
+    key: "sat_math",
+    label: "SAT Math",
+    ru: "Разобрали задачи по математике SAT: алгебра, геометрия, работа с данными.",
+    uz: "SAT matematika masalalari ko'rib chiqildi: algebra, geometriya, ma'lumotlar bilan ishlash.",
+  },
+  {
+    key: "sat_verbal",
+    label: "SAT Verbal",
+    ru: "Разобрали SAT Verbal: reading comprehension, grammar rules, работа с текстом.",
+    uz: "SAT Verbal ko'rib chiqildi: reading comprehension, grammatika qoidalari, matn bilan ishlash.",
+  },
+  {
+    key: "motivation",
+    label: "Мотивация / Motivatsiya",
+    ru: "Провели беседу о мотивации, поставили цели и обсудили план подготовки.",
+    uz: "Motivatsiya haqida suhbat o'tkazildi, maqsadlar belgilandi va tayyorgarlik rejasi muhokama qilindi.",
+  },
+  {
+    key: "parent",
+    label: "Связь с родителем / Ota-ona",
+    ru: "Родителю передана обратная связь по прогрессу ученика и рекомендации.",
+    uz: "Ota-onaga o'quvchi progressi va tavsiyalar bo'yicha fikr bildirildi.",
+  },
+  {
+    key: "individual",
+    label: "Индивид. план / Individual reja",
+    ru: "Составили индивидуальный план занятий с учётом слабых и сильных сторон.",
+    uz: "Kuchli va zaif tomonlarni hisobga olgan holda individual mashg'ulot rejasi tuzildi.",
   },
 ];
 
-function pad(n: number) {
-  return String(n).padStart(2, "0");
-}
+/* ── helpers ─────────────────────────────────────────────── */
 
-function getTodayDateInputValue(date = new Date()) {
+function pad(n: number) { return String(n).padStart(2, "0"); }
+
+function getTodayDateValue(date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-function roundTo5Minutes(date = new Date()) {
+function roundTo5(date = new Date()) {
   const d = new Date(date);
   d.setSeconds(0, 0);
-  const mins = d.getMinutes();
-  const rounded = Math.ceil(mins / 5) * 5;
-  if (rounded === 60) {
-    d.setHours(d.getHours() + 1);
-    d.setMinutes(0);
-  } else {
-    d.setMinutes(rounded);
-  }
+  const m = Math.ceil(d.getMinutes() / 5) * 5;
+  if (m === 60) { d.setHours(d.getHours() + 1); d.setMinutes(0); }
+  else d.setMinutes(m);
   return d;
 }
 
-function getTimeInputValue(date = new Date()) {
+function getTimeValue(date = new Date()) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function addMinutesToTime(timeHHMM: string, minutesToAdd: number) {
+function addMinutes(timeHHMM: string, mins: number) {
   const [hh, mm] = timeHHMM.split(":").map(Number);
-  const base = new Date();
-  base.setHours(hh || 0, mm || 0, 0, 0);
-  base.setMinutes(base.getMinutes() + minutesToAdd);
-  return getTimeInputValue(base);
+  const d = new Date();
+  d.setHours(hh || 0, (mm || 0) + mins, 0, 0);
+  return getTimeValue(d);
 }
 
-export default function SupportSessionForm({
-  students,
-  action,
-}: SupportSessionFormProps) {
-  const nowRounded = roundTo5Minutes(new Date());
+/* ── component ───────────────────────────────────────────── */
+
+export default function SupportSessionForm({ students, action }: SupportSessionFormProps) {
+  const now = roundTo5();
 
   const [query, setQuery] = useState("");
-  const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [date, setDate] = useState(getTodayDateInputValue(new Date()));
-  const [startTime, setStartTime] = useState(getTimeInputValue(nowRounded));
-  const [durationMin, setDurationMin] = useState<number>(30);
+  const [selectedId, setSelectedId] = useState("");
+  const [date, setDate] = useState(getTodayDateValue());
+  const [startTime, setStartTime] = useState(getTimeValue(now));
+  const [duration, setDuration] = useState(30);
   const [comment, setComment] = useState("");
   const [sendToParents, setSendToParents] = useState(true);
 
-  const endTime = useMemo(
-    () => addMinutesToTime(startTime, durationMin),
-    [startTime, durationMin]
-  );
+  const endTime = useMemo(() => addMinutes(startTime, duration), [startTime, duration]);
 
-  const filteredStudents = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return students.slice(0, 20);
-
-    return students
-      .filter((s) => {
-        const hay = `${s.name} ${s.groupName ?? ""}`.toLowerCase();
-        return hay.includes(q);
-      })
-      .slice(0, 30);
+    return students.filter((s) =>
+      `${s.name} ${s.groupName ?? ""}`.toLowerCase().includes(q)
+    ).slice(0, 30);
   }, [query, students]);
 
-  const selectedStudent = useMemo(
-    () => students.find((s) => s.id === selectedStudentId) ?? null,
-    [students, selectedStudentId]
-  );
+  const selected = students.find((s) => s.id === selectedId) ?? null;
 
-  function applyTemplate(template: { ru: string; uz: string }) {
-    const text = `RU: ${template.ru}\nUZ: ${template.uz}`;
-    setComment((prev) => (prev.trim() ? `${prev}\n\n${text}` : text));
+  function applyTemplate(t: { ru: string; uz: string }) {
+    const text = `RU: ${t.ru}\nUZ: ${t.uz}`;
+    setComment((prev) => prev.trim() ? `${prev}\n\n${text}` : text);
   }
 
   return (
-    <div className="bg-white p-6 rounded-2xl shadow space-y-5">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
       <div>
-        <h2 className="font-semibold text-lg">Log Support Session</h2>
-        <p className="text-sm text-slate-500 mt-1">
-          Быстрая форма: поиск ученика, авто-дата, start + duration
-        </p>
+        <h2 className="font-semibold text-gray-900">Log Support Session</h2>
+        <p className="text-xs text-gray-400 mt-1">Выберите ученика, время и добавьте комментарий</p>
       </div>
 
-      <form action={action} className="space-y-5">
-        {/* Hidden fields expected by server action */}
-        <input type="hidden" name="studentId" value={selectedStudentId} />
-        <input
-          type="hidden"
-          name="start"
-          value={`${date}T${startTime}`}
-        />
-        <input
-          type="hidden"
-          name="end"
-          value={`${date}T${endTime}`}
-        />
-        <input
-          type="hidden"
-          name="comment"
-          value={comment}
-        />
-        <input
-          type="hidden"
-          name="sendToParents"
-          value={sendToParents ? "1" : "0"}
-        />
+      <form action={action} className="space-y-6">
+        {/* Hidden fields */}
+        <input type="hidden" name="studentId" value={selectedId} />
+        <input type="hidden" name="start" value={`${date}T${startTime}`} />
+        <input type="hidden" name="end" value={`${date}T${endTime}`} />
+        <input type="hidden" name="comment" value={comment} />
+        <input type="hidden" name="sendToParents" value={sendToParents ? "1" : "0"} />
 
-        {/* Student search */}
+        {/* Student search + selected */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 space-y-2">
-            <label className="text-sm font-medium text-slate-700">
-              Поиск ученика / O‘quvchi qidirish
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Поиск ученика / O&apos;quvchi qidirish
             </label>
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Введите имя ученика или группу..."
-              className="w-full border p-2.5 rounded-lg"
+              placeholder="Имя или группа..."
+              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
             />
-
-            <div className="border rounded-xl bg-white max-h-60 overflow-auto">
-              {filteredStudents.length === 0 ? (
-                <div className="p-3 text-sm text-slate-500">
-                  Ничего не найдено
-                </div>
+            <div className="border border-gray-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <div className="p-3 text-sm text-gray-400">Ничего не найдено</div>
               ) : (
-                filteredStudents.map((student) => {
-                  const active = student.id === selectedStudentId;
+                filtered.map((s) => {
+                  const active = s.id === selectedId;
                   return (
                     <button
-                      key={student.id}
+                      key={s.id}
                       type="button"
-                      onClick={() => setSelectedStudentId(student.id)}
-                      className={`w-full text-left px-3 py-2 border-b last:border-b-0 transition ${
-                        active
-                          ? "bg-slate-900 text-white"
-                          : "hover:bg-slate-50"
+                      onClick={() => setSelectedId(s.id)}
+                      className={`w-full text-left px-4 py-2.5 border-b border-gray-50 last:border-0 transition text-sm ${
+                        active ? "bg-gray-900 text-white" : "hover:bg-gray-50"
                       }`}
                     >
-                      <div className="font-medium">{student.name}</div>
-                      <div
-                        className={`text-xs ${
-                          active ? "text-slate-200" : "text-slate-500"
-                        }`}
-                      >
-                        {student.groupName ?? "Без группы"}
-                      </div>
+                      <span className="font-medium">{s.name}</span>
+                      <span className={`ml-2 text-xs ${active ? "text-gray-300" : "text-gray-400"}`}>
+                        {s.groupName ?? "Без группы"}
+                      </span>
                     </button>
                   );
                 })
@@ -205,132 +227,108 @@ export default function SupportSessionForm({
           </div>
 
           <div className="space-y-3">
-            <label className="text-sm font-medium text-slate-700">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
               Выбранный ученик
             </label>
-
-            <div className="border rounded-xl p-3 min-h-[96px] bg-slate-50">
-              {selectedStudent ? (
+            <div className="border border-gray-200 rounded-xl p-4 min-h-20 bg-gray-50">
+              {selected ? (
                 <>
-                  <div className="font-semibold">{selectedStudent.name}</div>
-                  <div className="text-sm text-slate-600 mt-1">
-                    {selectedStudent.groupName ?? "Без группы"}
-                  </div>
+                  <p className="font-semibold text-gray-900">{selected.name}</p>
+                  <p className="text-sm text-gray-500 mt-0.5">{selected.groupName ?? "Без группы"}</p>
                 </>
               ) : (
-                <div className="text-sm text-slate-500">
-                  Сначала выберите ученика из списка
-                </div>
+                <p className="text-sm text-gray-400">Сначала выберите ученика</p>
               )}
             </div>
 
-            <label className="flex items-center gap-2 text-sm border rounded-xl p-3 bg-white">
+            <label className="flex items-center gap-3 cursor-pointer border border-gray-200 rounded-xl p-3 hover:bg-gray-50 transition">
               <input
                 type="checkbox"
                 checked={sendToParents}
                 onChange={(e) => setSendToParents(e.target.checked)}
+                className="w-4 h-4 accent-gray-900"
               />
-              <span>
-                Отправить отчёт родителям / Hisobotni ota-onaga yuborish
+              <span className="text-sm text-gray-700">
+                Отправить отчёт родителям
               </span>
             </label>
           </div>
         </div>
 
         {/* Date + Time */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1">
-              Дата / Sana
-            </label>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Дата / Sana</label>
             <input
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="w-full border p-2.5 rounded-lg"
+              className="w-full h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
             />
           </div>
-
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1">
-              Начало / Boshlanishi
-            </label>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Начало / Boshlanishi</label>
             <input
               type="time"
               step={300}
               value={startTime}
               onChange={(e) => setStartTime(e.target.value)}
-              className="w-full border p-2.5 rounded-lg"
+              className="w-full h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
             />
           </div>
-
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1">
-              Длительность / Davomiyligi
-            </label>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Длительность</label>
             <select
-              value={durationMin}
-              onChange={(e) => setDurationMin(Number(e.target.value))}
-              className="w-full border p-2.5 rounded-lg bg-white"
+              value={duration}
+              onChange={(e) => setDuration(Number(e.target.value))}
+              className="w-full h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
             >
               {DURATION_OPTIONS.map((m) => (
-                <option key={m} value={m}>
-                  {m} min
-                </option>
+                <option key={m} value={m}>{m} мин</option>
               ))}
             </select>
           </div>
-
-          <div>
-            <label className="text-sm font-medium text-slate-700 block mb-1">
-              Конец (auto) / Tugashi
-            </label>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Конец (авто)</label>
             <input
               type="time"
               value={endTime}
               readOnly
-              className="w-full border p-2.5 rounded-lg bg-slate-100 text-slate-700"
+              className="w-full h-11 border border-gray-200 rounded-xl px-3 text-sm bg-gray-50 text-gray-600"
             />
           </div>
         </div>
 
-        {/* Quick templates */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-slate-700">
+        {/* Templates */}
+        <div className="space-y-3">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
             Быстрые шаблоны (RU + UZ)
           </label>
-
           <div className="flex flex-wrap gap-2">
-            {COMMENT_TEMPLATES.map((tpl) => (
+            {COMMENT_TEMPLATES.map((t) => (
               <button
-                key={tpl.key}
+                key={t.key}
                 type="button"
-                onClick={() => applyTemplate(tpl)}
-                className="px-3 py-2 rounded-lg border bg-white hover:bg-slate-50 text-sm"
-                title={`${tpl.ru}\n${tpl.uz}`}
+                onClick={() => applyTemplate(t)}
+                title={`RU: ${t.ru}\nUZ: ${t.uz}`}
+                className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs text-gray-700 hover:bg-gray-900 hover:text-white hover:border-gray-900 transition"
               >
-                {tpl.key === "hw_explained" && "Домашка / Uy vazifasi"}
-                {tpl.key === "revision_done" && "Повторение / Takrorlash"}
-                {tpl.key === "speaking_practice" && "Speaking practice"}
-                {tpl.key === "missed_topics" && "Пропущенные темы / Qoldirilgan mavzu"}
-                {tpl.key === "exam_support" && "Подготовка / Tayyorgarlik"}
-                {tpl.key === "parent_contacted" && "Связь с родителем / Ota-ona"}
+                {t.label}
               </button>
             ))}
-
             <button
               type="button"
               onClick={() => setComment("")}
-              className="px-3 py-2 rounded-lg border bg-white hover:bg-red-50 text-sm"
+              className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs text-red-500 hover:bg-red-50 hover:border-red-200 transition"
             >
               Очистить / Tozalash
             </button>
           </div>
         </div>
 
-        {/* Comment editor */}
-        <div>
-          <label className="text-sm font-medium text-slate-700 block mb-1">
+        {/* Comment textarea */}
+        <div className="space-y-1">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
             Комментарий / Izoh (можно свой текст)
           </label>
           <textarea
@@ -338,17 +336,16 @@ export default function SupportSessionForm({
             onChange={(e) => setComment(e.target.value)}
             placeholder="Введите комментарий вручную или используйте шаблоны выше..."
             rows={6}
-            className="w-full border p-3 rounded-xl"
+            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 resize-y"
           />
-          <p className="text-xs text-slate-500 mt-1">
-            Шаблоны можно комбинировать. Свой текст тоже можно добавить.
-          </p>
+          <p className="text-xs text-gray-400">Шаблоны можно комбинировать. Свой текст тоже можно добавить.</p>
         </div>
 
+        {/* Submit */}
         <button
           type="submit"
-          disabled={!selectedStudentId}
-          className="w-full bg-black text-white py-3 rounded-xl hover:opacity-85 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={!selectedId}
+          className="w-full h-12 bg-gray-900 text-white rounded-xl font-semibold text-sm hover:bg-gray-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Save Session
         </button>

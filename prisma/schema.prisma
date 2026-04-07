@@ -194,25 +194,28 @@ model TelegramDelivery {
 }
 
 model Payment {
+
   id        String         @id @default(uuid())
 
   studentId String
   student   Student        @relation(fields: [studentId], references: [id])
 
-  // snapshot for reporting
+
   teacherId String?
   teacher   User?          @relation(fields: [teacherId], references: [id])
 
   groupId   String?
   group     Group?         @relation(fields: [groupId], references: [id])
 
-  // month coverage window: [periodStart, periodEnd)
+
   periodStart DateTime
   periodEnd   DateTime
 
   classesIncluded Int      @default(12)
-
-  amount     Int           // UZS as int
+  amount     Int           // UZS as int (after discount)
+  baseAmount Int           @default(0) // original price before discount
+  discountPct Int          @default(0) // 0–100
+  bonus      Int           @default(0) // bonus in UZS
   status     PaymentStatus @default(PAID)
   method     PaymentMethod
 
@@ -226,6 +229,25 @@ model Payment {
   @@index([teacherId, periodStart])
   @@index([studentId, periodStart])
   @@index([periodStart, periodEnd])
+}
+model Lead {
+  id        String     @id @default(uuid())
+  name      String
+  phone     String?
+  source    String?    // "instagram" | "telegram" | "manual"
+  program   String?    // "IELTS" | "SAT" | "B2" etc
+  status    LeadStatus @default(NEW)
+  note      String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+enum LeadStatus {
+  NEW
+  ACTIVE
+  FROZEN
+  CONVERTED
+  LOST
 }
 
 enum Role {
