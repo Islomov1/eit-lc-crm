@@ -29,6 +29,7 @@ export default function LoginPage() {
       else if (role === "TEACHER") router.push("/teacher");
       else if (role === "SUPPORT") router.push("/support");
       else setError("Unknown role");
+      if (role === "DIRECTOR") router.push("/admin");
     } catch {
       setError("Network error. Try again.");
     } finally {

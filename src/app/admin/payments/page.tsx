@@ -34,7 +34,6 @@ export default async function PaymentsPage(props: { searchParams?: Promise<SP> }
 
   const paidCount = sheet?.rows.filter((r) => r.paid).length ?? 0;
   const unpaidCount = sheet ? sheet.rows.length - paidCount : 0;
-  const totalRevenue = sheet?.rows.reduce((s, r) => s + (r.paid ? r.amount : 0), 0) ?? 0;
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
@@ -98,7 +97,7 @@ export default async function PaymentsPage(props: { searchParams?: Promise<SP> }
         </form>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards — amounts hidden, counts only */}
       {sheet && (
         <div className="grid grid-cols-3 gap-4">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
@@ -106,7 +105,7 @@ export default async function PaymentsPage(props: { searchParams?: Promise<SP> }
             <p className="text-2xl font-bold text-gray-900 mt-1">{sheet.rows.length}</p>
           </div>
           <div className="bg-green-50 rounded-2xl border border-green-100 p-5">
-            <p className="text-xs font-semibold text-green-500 uppercase tracking-wide">Paid · {fmt(totalRevenue)} UZS</p>
+            <p className="text-xs font-semibold text-green-500 uppercase tracking-wide">Paid</p>
             <p className="text-2xl font-bold text-green-700 mt-1">{paidCount}</p>
           </div>
           <div className={`rounded-2xl border p-5 ${unpaidCount > 0 ? "bg-red-50 border-red-100" : "bg-gray-50 border-gray-100"}`}>
@@ -129,12 +128,12 @@ export default async function PaymentsPage(props: { searchParams?: Promise<SP> }
           </div>
           <form action={sendPaymentReminders}>
             <input type="hidden" name="month" value={month} />
-           <button
-  type="submit"
-  style={{ background: "#f59e0b", color: "white", height: "36px", padding: "0 20px", borderRadius: "10px", fontSize: "13px", fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
->
-  📩 Send Reminders
-</button>
+            <button
+              type="submit"
+              style={{ background: "#f59e0b", color: "white", height: "36px", padding: "0 20px", borderRadius: "10px", fontSize: "13px", fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+            >
+              📩 Send Reminders
+            </button>
           </form>
         </div>
       )}
@@ -147,15 +146,11 @@ export default async function PaymentsPage(props: { searchParams?: Promise<SP> }
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
 
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <span className="font-semibold text-gray-900 text-sm">{sheet.teacher.name}</span>
-              <span className="text-gray-400 mx-2">·</span>
-              <span className="text-gray-600 text-sm">{month}</span>
-            </div>
-            <div className="text-sm font-semibold text-gray-900">
-              Revenue: <span className="text-green-600">{fmt(totalRevenue)} UZS</span>
-            </div>
+          {/* Table header bar — revenue removed */}
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+            <span className="font-semibold text-gray-900 text-sm">{sheet.teacher.name}</span>
+            <span className="text-gray-400">·</span>
+            <span className="text-gray-600 text-sm">{month}</span>
           </div>
 
           <div className="overflow-x-auto">

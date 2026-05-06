@@ -11,7 +11,7 @@ async function createUser(formData: FormData) {
   const name = formData.get("name")?.toString().trim();
   const email = formData.get("email")?.toString().trim();
   const password = formData.get("password")?.toString();
-  const role = formData.get("role")?.toString() as "ADMIN" | "TEACHER" | "SUPPORT";
+  const role = formData.get("role")?.toString() as "ADMIN" | "DIRECTOR" | "TEACHER" | "SUPPORT";
 
   if (!name || !email || !password || !role) return;
 
@@ -34,7 +34,7 @@ async function updateUser(formData: FormData) {
   const id = formData.get("id")?.toString();
   const name = formData.get("name")?.toString().trim();
   const email = formData.get("email")?.toString().trim();
-  const role = formData.get("role")?.toString() as "ADMIN" | "TEACHER" | "SUPPORT";
+  const role = formData.get("role")?.toString() as "ADMIN" | "DIRECTOR" | "TEACHER" | "SUPPORT";
   const password = formData.get("password")?.toString();
 
   if (!id || !name || !email || !role) return;
@@ -84,9 +84,10 @@ async function deleteUser(formData: FormData) {
 /* ================= HELPERS ================= */
 
 const ROLE_COLORS: Record<string, string> = {
-  ADMIN: "bg-purple-100 text-purple-700",
-  TEACHER: "bg-blue-100 text-blue-700",
-  SUPPORT: "bg-green-100 text-green-700",
+  DIRECTOR: "bg-purple-100 text-purple-700",
+  ADMIN: "bg-blue-100 text-blue-700",
+  TEACHER: "bg-green-100 text-green-700",
+  SUPPORT: "bg-orange-100 text-orange-700",
 };
 
 /* ================= PAGE ================= */
@@ -96,6 +97,7 @@ export default async function UsersPage() {
     orderBy: { createdAt: "desc" },
   });
 
+  const directors = users.filter((u) => u.role === "DIRECTOR");
   const admins = users.filter((u) => u.role === "ADMIN");
   const teachers = users.filter((u) => u.role === "TEACHER");
   const supports = users.filter((u) => u.role === "SUPPORT");
@@ -105,7 +107,7 @@ export default async function UsersPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Users</h1>
         <p className="text-sm text-gray-500 mt-1">
-          {users.length} total · {admins.length} admin · {teachers.length} teacher · {supports.length} support
+          {users.length} total · {directors.length} director · {admins.length} admin · {teachers.length} teacher · {supports.length} support
         </p>
       </div>
 
@@ -120,7 +122,7 @@ export default async function UsersPage() {
               name="name"
               placeholder="e.g. Jasmine Sultonova"
               required
-              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
             />
           </div>
 
@@ -131,7 +133,7 @@ export default async function UsersPage() {
               type="email"
               placeholder="email@eitlc.uz"
               required
-              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
             />
           </div>
 
@@ -143,7 +145,7 @@ export default async function UsersPage() {
               placeholder="Minimum 8 characters"
               required
               minLength={8}
-              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
             />
           </div>
 
@@ -152,11 +154,12 @@ export default async function UsersPage() {
             <select
               name="role"
               required
-              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+              className="w-full h-11 border border-gray-200 rounded-xl px-4 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
             >
+              <option value="DIRECTOR">Director</option>
+              <option value="ADMIN">Admin</option>
               <option value="TEACHER">Teacher</option>
               <option value="SUPPORT">Support</option>
-              <option value="ADMIN">Admin</option>
             </select>
           </div>
 
@@ -178,6 +181,7 @@ export default async function UsersPage() {
           <div className="divide-y divide-gray-50">
             {users.map((user) => (
               <div key={user.id} className="px-6 py-5">
+
                 {/* User header */}
                 <div className="flex items-center gap-3 mb-4">
                   <div className="w-9 h-9 rounded-full bg-gray-900 text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
@@ -187,12 +191,12 @@ export default async function UsersPage() {
                     <p className="font-semibold text-gray-900 text-sm">{user.name}</p>
                     <p className="text-xs text-gray-500">{user.email}</p>
                   </div>
-                  <span className={`ml-auto text-xs font-semibold px-3 py-1 rounded-full ${ROLE_COLORS[user.role]}`}>
+                  <span className={`ml-auto text-xs font-semibold px-3 py-1 rounded-full ${ROLE_COLORS[user.role] ?? "bg-gray-100 text-gray-600"}`}>
                     {user.role}
                   </span>
                 </div>
 
-                {/* Single update form — all fields together */}
+                {/* Update form */}
                 <form action={updateUser} className="grid grid-cols-2 gap-3">
                   <input type="hidden" name="id" value={user.id} />
 
@@ -223,6 +227,7 @@ export default async function UsersPage() {
                       defaultValue={user.role}
                       className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900"
                     >
+                      <option value="DIRECTOR">Director</option>
                       <option value="ADMIN">Admin</option>
                       <option value="TEACHER">Teacher</option>
                       <option value="SUPPORT">Support</option>
@@ -241,26 +246,24 @@ export default async function UsersPage() {
                     />
                   </div>
 
-                 {/* Buttons */}
-<div className="col-span-2 flex items-center justify-between pt-1">
-  <button
-    type="submit"
-    className="h-9 px-5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] transition"
-  >
-    Save Changes
-  </button>
-
-  <button
-    type="submit"
-    formAction={deleteUser}
-    className="h-9 px-5 rounded-xl border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 active:scale-[0.99] transition"
-  >
-    Delete User
-  </button>
-</div>
-</form>
-</div>
-        ))}
+                  <div className="col-span-2 flex items-center justify-between pt-1">
+                    <button
+                      type="submit"
+                      className="h-9 px-5 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] transition"
+                    >
+                      Save Changes
+                    </button>
+                    <button
+                      type="submit"
+                      formAction={deleteUser}
+                      className="h-9 px-5 rounded-xl border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 active:scale-[0.99] transition"
+                    >
+                      Delete User
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ))}
           </div>
         )}
 

@@ -19,24 +19,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
 
-    const cookieStore = await cookies(); // ✅ REQUIRED
+    const cookieStore = await cookies();
     const isProd = process.env.NODE_ENV === "production";
     const maxAge = 60 * 60 * 24 * 30;
 
     cookieStore.set("userId", user.id, {
-      httpOnly: true,
-      path: "/",
-      sameSite: "lax",
-      secure: isProd,
-      maxAge,
+      httpOnly: true, path: "/", sameSite: "lax", secure: isProd, maxAge,
     });
-
     cookieStore.set("userRole", user.role, {
-      httpOnly: true,
-      path: "/",
-      sameSite: "lax",
-      secure: isProd,
-      maxAge,
+      httpOnly: true, path: "/", sameSite: "lax", secure: isProd, maxAge,
     });
 
     return NextResponse.json({

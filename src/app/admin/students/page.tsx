@@ -17,11 +17,23 @@ async function createStudent(formData: FormData) {
   revalidatePath("/admin/students");
 }
 
+async function updateStudent(formData: FormData) {
+  "use server";
+  const id = formData.get("id")?.toString();
+  const name = formData.get("name")?.toString().trim();
+  const groupId = formData.get("groupId")?.toString();
+  if (!id || !name) return;
+  await prisma.student.update({
+    where: { id },
+    data: { name, groupId: groupId || null },
+  });
+  revalidatePath("/admin/students");
+}
+
 async function deleteStudent(formData: FormData) {
   "use server";
   const id = formData.get("id")?.toString();
   if (!id) return;
-  // Параллельное удаление зависимостей
   await Promise.all([
     prisma.parentInvite.deleteMany({ where: { studentId: id } }),
     prisma.telegramDelivery.deleteMany({ where: { studentId: id } }),
@@ -86,7 +98,6 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
   const inviteCode = typeof sp.invite === "string" ? sp.invite : undefined;
   const inviteStudent = typeof sp.student === "string" ? sp.student : undefined;
 
-  // ✅ Параллельные запросы
   const [groups, students] = await Promise.all([
     prisma.group.findMany({
       orderBy: { name: "asc" },
@@ -143,14 +154,23 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
             placeholder="Search: student / group / parent / phone"
             className="flex-1 h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[220px]"
           />
-          <select name="groupId" defaultValue={groupIdFilter} className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+          <select
+            name="groupId"
+            defaultValue={groupIdFilter}
+            className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          >
             <option value="">All groups</option>
-            {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
           </select>
           <button className="h-11 px-6 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">
             Search
           </button>
-          <Link href="/admin/students" className="h-11 px-4 flex items-center border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition">
+          <Link
+            href="/admin/students"
+            className="h-11 px-4 flex items-center border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition"
+          >
             Reset
           </Link>
         </form>
@@ -160,10 +180,20 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
         <h2 className="font-semibold text-gray-900">Create Student</h2>
         <form action={createStudent} className="flex gap-3 flex-wrap">
-          <input name="name" placeholder="Student name" required className="flex-1 h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[200px]" />
-          <select name="groupId" className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+          <input
+            name="name"
+            placeholder="Student name"
+            required
+            className="flex-1 h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[200px]"
+          />
+          <select
+            name="groupId"
+            className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          >
             <option value="">No group</option>
-            {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
           </select>
           <button className="h-11 px-6 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">
             Create Student
@@ -184,17 +214,46 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
 
             {/* Student header */}
             <div className="flex items-start justify-between gap-4 flex-wrap">
-              <div>
+              <div className="flex-1 min-w-0">
                 <h3 className="font-semibold text-gray-900">
                   <Link href={`/admin/students/${student.id}`} className="hover:text-blue-600 transition">
                     {student.name}
                   </Link>
                 </h3>
                 <p className="text-sm text-gray-500 mt-0.5">
-                  Group: {student.group?.name ?? "Not assigned"}
+                  Group: <span className="font-medium text-gray-700">{student.group?.name ?? "Not assigned"}</span>
                 </p>
+
+                {/* ✅ EDIT STUDENT FORM */}
+                <form action={updateStudent} className="flex gap-2 flex-wrap mt-3">
+                  <input type="hidden" name="id" value={student.id} />
+                  <input
+                    name="name"
+                    defaultValue={student.name}
+                    placeholder="Student name"
+                    required
+                    className="h-9 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[160px]"
+                  />
+                  <select
+                    name="groupId"
+                    defaultValue={student.groupId ?? ""}
+                    className="h-9 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">No group</option>
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    className="h-9 px-4 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition"
+                  >
+                    Save
+                  </button>
+                </form>
               </div>
-              <div className="flex items-center gap-3">
+
+              <div className="flex items-center gap-3 shrink-0">
                 <form action={createParentInvite}>
                   <input type="hidden" name="studentId" value={student.id} />
                   <button className="h-9 px-4 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition">
@@ -222,16 +281,39 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
                 <div key={parent.id} className="bg-gray-50 rounded-xl p-4">
                   <form action={updateParent} className="grid grid-cols-2 gap-3">
                     <input type="hidden" name="id" value={parent.id} />
-                    <input name="name" defaultValue={parent.name} className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white" />
-                    <input name="phone" defaultValue={parent.phone} className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white" />
-
+                    <input
+                      name="name"
+                      defaultValue={parent.name}
+                      className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white"
+                    />
+                    <input
+                      name="phone"
+                      defaultValue={parent.phone}
+                      className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 bg-white"
+                    />
                     <div className="col-span-2 flex items-center justify-between">
-                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${parent.telegramId ? "bg-green-100 text-green-700" : "bg-gray-200 text-gray-500"}`}>
-                        {parent.telegramId ? `✅ Telegram linked · ${parent.telegramId.toString()}` : "❌ Not linked"}
+                      <span
+                        className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                          parent.telegramId
+                            ? "bg-green-100 text-green-700"
+                            : "bg-gray-200 text-gray-500"
+                        }`}
+                      >
+                        {parent.telegramId
+                          ? `✅ Telegram linked · ${parent.telegramId.toString()}`
+                          : "❌ Not linked"}
                       </span>
                       <div className="flex gap-3">
-                        <button type="submit" className="text-sm text-blue-600 hover:underline font-medium">Save</button>
-                        <button type="submit" formAction={deleteParent} className="text-sm text-red-500 hover:underline font-medium">Delete</button>
+                        <button type="submit" className="text-sm text-blue-600 hover:underline font-medium">
+                          Save
+                        </button>
+                        <button
+                          type="submit"
+                          formAction={deleteParent}
+                          className="text-sm text-red-500 hover:underline font-medium"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
                   </form>
@@ -244,8 +326,18 @@ export default async function StudentsPage({ searchParams }: { searchParams: Pro
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Add Parent</p>
               <form action={createParent} className="flex gap-3 flex-wrap">
                 <input type="hidden" name="studentId" value={student.id} />
-                <input name="name" placeholder="Parent name" required className="flex-1 h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[150px]" />
-                <input name="phone" placeholder="+998..." required className="flex-1 h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[150px]" />
+                <input
+                  name="name"
+                  placeholder="Parent name"
+                  required
+                  className="flex-1 h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[150px]"
+                />
+                <input
+                  name="phone"
+                  placeholder="+998..."
+                  required
+                  className="flex-1 h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[150px]"
+                />
                 <button className="h-10 px-5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">
                   Add Parent
                 </button>

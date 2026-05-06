@@ -30,11 +30,20 @@ async function updateGroup(formData: FormData) {
   const startTime = formData.get("startTime")?.toString();
   const endTime = formData.get("endTime")?.toString();
   const teacherId = formData.get("teacherId")?.toString();
+  const programId = formData.get("programId")?.toString(); // ✅ added
   const status = formData.get("status")?.toString() as GroupStatus;
   if (!id || !name || !schedule || !startTime || !endTime) return;
   await prisma.group.update({
     where: { id },
-    data: { name, schedule, startTime, endTime, teacherId: teacherId || null, status },
+    data: {
+      name,
+      schedule,
+      startTime,
+      endTime,
+      teacherId: teacherId || null,
+      ...(programId ? { programId } : {}), // ✅ only update if provided
+      status,
+    },
   });
   revalidatePath("/admin/groups");
 }
@@ -92,7 +101,6 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
     ];
   }
 
-  // ✅ Параллельные запросы
   const [groups, programs, teachers] = await Promise.all([
     prisma.group.findMany({
       where,
@@ -129,26 +137,48 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
             defaultValue={q}
             className="h-11 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[220px]"
           />
-          <select name="programId" defaultValue={selectedProgramId} className="h-11 px-4 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+          <select
+            name="programId"
+            defaultValue={selectedProgramId}
+            className="h-11 px-4 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          >
             <option value="">All programs</option>
-            {programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {programs.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
           </select>
-          <select name="teacherId" defaultValue={teacherId} className="h-11 px-4 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+          <select
+            name="teacherId"
+            defaultValue={teacherId}
+            className="h-11 px-4 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          >
             <option value="">All teachers</option>
             <option value="none">No teacher</option>
-            {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {teachers.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
           </select>
-          <select name="status" defaultValue={status} className="h-11 px-4 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+          <select
+            name="status"
+            defaultValue={status}
+            className="h-11 px-4 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          >
             <option value="">All status</option>
             <option value="NEW">NEW</option>
             <option value="ACTIVE">ACTIVE</option>
             <option value="FINISHING">FINISHING</option>
             <option value="EXPIRED">EXPIRED</option>
           </select>
-          <button type="submit" className="h-11 px-6 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 transition">
+          <button
+            type="submit"
+            className="h-11 px-6 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 transition"
+          >
             Apply
           </button>
-          <Link href="/admin/groups" className="h-11 px-6 flex items-center rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition">
+          <Link
+            href="/admin/groups"
+            className="h-11 px-6 flex items-center rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition"
+          >
             Reset
           </Link>
         </form>
@@ -158,20 +188,52 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
         <h2 className="font-semibold text-gray-900">Create Group</h2>
         <form action={createGroup} className="grid grid-cols-6 gap-4">
-          <input name="name" placeholder="Group name" required className="col-span-2 h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-          <select name="schedule" required className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+          <input
+            name="name"
+            placeholder="Group name"
+            required
+            className="col-span-2 h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          />
+          <select
+            name="schedule"
+            required
+            className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          >
             <option value="MWF">Mon-Wed-Fri</option>
             <option value="TTS">Tue-Thu-Sat</option>
           </select>
-          <select name="programId" required defaultValue="" className="col-span-2 h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+          <select
+            name="programId"
+            required
+            defaultValue=""
+            className="col-span-2 h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          >
             <option value="" disabled>Select program</option>
-            {programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {programs.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
           </select>
-          <input type="time" name="startTime" required className="h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-          <input type="time" name="endTime" required className="h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-          <select name="teacherId" defaultValue="" className="col-span-2 h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+          <input
+            type="time"
+            name="startTime"
+            required
+            className="h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          />
+          <input
+            type="time"
+            name="endTime"
+            required
+            className="h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          />
+          <select
+            name="teacherId"
+            defaultValue=""
+            className="col-span-2 h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+          >
             <option value="">No teacher</option>
-            {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {teachers.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
           </select>
           <button className="col-span-6 h-11 bg-gray-900 text-white rounded-xl font-semibold text-sm hover:bg-gray-700 transition">
             Create Group
@@ -194,12 +256,16 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
                 <h3 className="font-semibold text-gray-900">{group.name}</h3>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[group.status] ?? "bg-gray-100 text-gray-600"}`}>
+                <span
+                  className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                    STATUS_COLORS[group.status] ?? "bg-gray-100 text-gray-600"
+                  }`}
+                >
                   {group.status}
                 </span>
               </div>
               <div className="flex items-center gap-4 text-sm text-gray-500">
-                <span>Program: {group.program?.name ?? "—"}</span>
+                <span>Program: <span className="font-medium text-gray-700">{group.program?.name ?? "—"}</span></span>
                 <span>{group.students.length} students</span>
                 <form action={deleteGroup}>
                   <input type="hidden" name="id" value={group.id} />
@@ -210,27 +276,72 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
               </div>
             </div>
 
-            {/* Update form */}
+            {/* ✅ EDIT FORM — now includes programId */}
             <form action={updateGroup} className="grid grid-cols-6 gap-3">
               <input type="hidden" name="id" value={group.id} />
-              <input name="name" defaultValue={group.name} className="col-span-2 h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-              <select name="schedule" defaultValue={group.schedule} className="h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+
+              {/* Row 1: name, schedule, program */}
+              <input
+                name="name"
+                defaultValue={group.name}
+                placeholder="Group name"
+                className="col-span-2 h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              />
+              <select
+                name="schedule"
+                defaultValue={group.schedule}
+                className="h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              >
                 <option value="MWF">MWF</option>
                 <option value="TTS">TTS</option>
               </select>
-              <input type="time" name="startTime" defaultValue={group.startTime} className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-              <input type="time" name="endTime" defaultValue={group.endTime} className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-              <select name="teacherId" defaultValue={group.teacherId || ""} className="h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
-                <option value="">No teacher</option>
-                {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {/* ✅ Program selector */}
+              <select
+                name="programId"
+                defaultValue={group.programId}
+                className="col-span-3 h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              >
+                {programs.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
               </select>
-              <select name="status" defaultValue={group.status} className="col-span-2 h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
+
+              {/* Row 2: times, teacher, status */}
+              <input
+                type="time"
+                name="startTime"
+                defaultValue={group.startTime}
+                className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              />
+              <input
+                type="time"
+                name="endTime"
+                defaultValue={group.endTime}
+                className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              />
+              <select
+                name="teacherId"
+                defaultValue={group.teacherId || ""}
+                className="col-span-2 h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              >
+                <option value="">No teacher</option>
+                {teachers.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              <select
+                name="status"
+                defaultValue={group.status}
+                className="col-span-2 h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+              >
                 <option value="NEW">NEW</option>
                 <option value="ACTIVE">ACTIVE</option>
                 <option value="FINISHING">FINISHING</option>
                 <option value="EXPIRED">EXPIRED</option>
               </select>
-              <button className="col-span-4 h-10 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 transition">
+
+              {/* Save button */}
+              <button className="col-span-6 h-10 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 transition">
                 Save Changes
               </button>
             </form>
@@ -238,12 +349,18 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
             {/* Students list */}
             {group.students.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Students</p>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                  Students ({group.students.length})
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {group.students.map((s) => (
-                    <span key={s.id} className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700">
+                    <Link
+                      key={s.id}
+                      href={`/admin/students/${s.id}`}
+                      className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700 hover:bg-gray-200 transition"
+                    >
                       {s.name}
-                    </span>
+                    </Link>
                   ))}
                 </div>
               </div>
