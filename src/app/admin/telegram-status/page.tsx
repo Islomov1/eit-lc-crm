@@ -38,7 +38,7 @@ export default async function TelegramStatusPage(props: { searchParams: SP }) {
         select: {
           id: true,
           name: true,
-          group: { select: { name: true } },
+          groups: { select: { name: true }, take: 1 },
         },
       },
       telegramDeliveries: {
@@ -67,7 +67,7 @@ export default async function TelegramStatusPage(props: { searchParams: SP }) {
         telegramId: p.telegramId ? p.telegramId.toString() : null,
         linked: isLinked,
         studentName: p.student.name,
-        groupName: p.student.group?.name ?? "—",
+        groupName: p.student.groups[0]?.name ?? "—",
         deliveryStatus: last?.status ?? null,
         deliveryAt: last?.sentAt ?? last?.lastAttemptAt ?? last?.createdAt ?? null,
         error: last?.error ?? null,

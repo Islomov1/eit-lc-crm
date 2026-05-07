@@ -36,8 +36,7 @@ function clamp(v: number, min: number, max: number) {
   return Math.min(Math.max(v, min), max);
 }
 
-/** Calculate final amount from base, discount %, and bonus */
- function calcFinalAmount(base: number, discountPct: number, bonus: number): number {
+function calcFinalAmount(base: number, discountPct: number, bonus: number): number {
   const discounted = Math.round(base * (1 - clamp(discountPct, 0, 100) / 100));
   return Math.max(0, discounted + bonus);
 }
@@ -68,16 +67,21 @@ export async function getTeacherSheet(params: {
 
   const q = (params.q || "").trim();
 
+  // ✅ Use groups (many-to-many) instead of group
   const students = await prisma.student.findMany({
     where: {
-      group: { teacherId: params.teacherId },
+      groups: { some: { teacherId: params.teacherId } },
       ...(q ? { name: { contains: q, mode: "insensitive" } } : {}),
     },
     orderBy: [{ name: "asc" }],
     select: {
       id: true,
       name: true,
-      group: { select: { id: true, name: true, teacherId: true } },
+      // ✅ Return all groups for this teacher
+      groups: {
+        where: { teacherId: params.teacherId },
+        select: { id: true, name: true, teacherId: true },
+      },
     },
   });
 
@@ -89,6 +93,7 @@ export async function getTeacherSheet(params: {
     select: {
       id: true,
       studentId: true,
+      groupId: true,
       amount: true,
       baseAmount: true,
       discountPct: true,
@@ -107,10 +112,14 @@ export async function getTeacherSheet(params: {
     const isPaid =
       !!p && (p.status === PaymentStatus.PAID || p.status === PaymentStatus.PARTIAL);
 
+    // Pick the first group that belongs to this teacher
+    const teacherGroup = s.groups[0] ?? null;
+
     return {
       studentId: s.id,
       studentName: s.name,
-      groupName: s.group?.name ?? "—",
+      groupName: teacherGroup?.name ?? "—",
+      groupId: teacherGroup?.id ?? null,
       paid: isPaid,
       paymentId: p?.id ?? null,
       baseAmount: p?.baseAmount ?? 0,
@@ -148,17 +157,24 @@ export async function saveStudentPayment(formData: FormData) {
 
   const { start, end } = monthWindowFromYYYYMM(month);
 
+  // ✅ Use groups (many-to-many)
   const student = await prisma.student.findUnique({
     where: { id: studentId },
-    include: { group: true },
+    include: {
+      groups: {
+        where: { teacherId },
+        select: { id: true, teacherId: true },
+      },
+    },
   });
 
   if (!student) throw new Error("Student not found");
 
-  const groupId = student.group?.id ?? null;
-  const snapshotTeacherId = student.group?.teacherId ?? null;
+  // Pick the first group belonging to this teacher
+  const teacherGroup = student.groups[0] ?? null;
+  const groupId = teacherGroup?.id ?? null;
 
-  if (snapshotTeacherId !== teacherId) {
+  if (!teacherGroup) {
     throw new Error("This student is not assigned to this teacher");
   }
 
@@ -200,17 +216,11 @@ export async function saveStudentPayment(formData: FormData) {
 }
 
 export async function deletePayment(formData: FormData) {
-  
-
   const id = formData.get("id")?.toString();
   if (!id) return;
-
   await prisma.payment.delete({ where: { id } });
-
   revalidatePath("/admin/payments");
 }
-
-// ── ДОБАВЬ В КОНЕЦ actions.ts ──────────────────────────────
 
 export async function sendPaymentReminders(formData: FormData) {
   const month = String(formData.get("month") || "");
@@ -218,30 +228,28 @@ export async function sendPaymentReminders(formData: FormData) {
 
   const { start } = monthWindowFromYYYYMM(month);
 
-  // Все активные студенты в группах
+  // ✅ Use groups (many-to-many) — students in at least one group
   const allStudents = await prisma.student.findMany({
-    where: { groupId: { not: null } },
+    where: { groups: { some: {} } },
     select: {
       id: true,
       name: true,
-      group: { select: { name: true } },
+      groups: { select: { name: true }, take: 1 },
       parents: { select: { id: true, telegramId: true, name: true } },
     },
   });
 
-  // Кто уже заплатил за этот месяц
   const paidStudentIds = await prisma.payment.findMany({
     where: { periodStart: start, status: { in: ["PAID", "PARTIAL"] } },
     select: { studentId: true },
   });
   const paidSet = new Set(paidStudentIds.map((p) => p.studentId));
 
-  // Только неоплатившие у кого есть привязанный Telegram
   const unpaid = allStudents.filter(
     (s) => !paidSet.has(s.id) && s.parents.some((p) => p.telegramId !== null)
   );
 
-  if (unpaid.length === 0) return ;
+  if (unpaid.length === 0) return;
 
   const monthLabel = new Date(start).toLocaleString("ru-RU", { month: "long", year: "numeric" });
   const monthLabelUz = new Date(start).toLocaleString("uz-UZ", { month: "long", year: "numeric" });
@@ -255,6 +263,8 @@ export async function sendPaymentReminders(formData: FormData) {
     const linkedParents = student.parents.filter((p) => p.telegramId !== null);
     if (linkedParents.length === 0) { skipped++; continue; }
 
+    const groupName = student.groups[0]?.name ?? "—";
+
     const message = `
 💳 НАПОМИНАНИЕ ОБ ОПЛАТЕ
 EIT LC
@@ -263,7 +273,7 @@ EIT LC
 
 Оплата за обучение за ${monthLabel} для вашего ребёнка:
 👤 ${student.name}
-📚 Группа: ${student.group?.name ?? "—"}
+📚 Группа: ${groupName}
 
 ещё не поступила. Просим оплатить в ближайшее время.
 
@@ -278,7 +288,7 @@ Hurmatli ota-ona!
 
 ${monthLabelUz} oyi uchun o'qish to'lovi:
 👤 ${student.name}
-📚 Guruh: ${student.group?.name ?? "—"}
+📚 Guruh: ${groupName}
 
 hali amalga oshirilmagan. Iltimos, yaqin orada to'lovni amalga oshiring.
 
@@ -302,6 +312,6 @@ Savollar uchun: +998 77 114 11 33
     }
   }
 
-console.log(`Reminders: ${sent} sent, ${skipped} skipped`);
-revalidatePath("/admin/payments");
+  console.log(`Reminders: ${sent} sent, ${skipped} skipped`);
+  revalidatePath("/admin/payments");
 }

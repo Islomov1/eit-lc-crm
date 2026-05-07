@@ -30,7 +30,7 @@ async function updateGroup(formData: FormData) {
   const startTime = formData.get("startTime")?.toString();
   const endTime = formData.get("endTime")?.toString();
   const teacherId = formData.get("teacherId")?.toString();
-  const programId = formData.get("programId")?.toString(); // ✅ added
+  const programId = formData.get("programId")?.toString();
   const status = formData.get("status")?.toString() as GroupStatus;
   if (!id || !name || !schedule || !startTime || !endTime) return;
   await prisma.group.update({
@@ -41,7 +41,7 @@ async function updateGroup(formData: FormData) {
       startTime,
       endTime,
       teacherId: teacherId || null,
-      ...(programId ? { programId } : {}), // ✅ only update if provided
+      ...(programId ? { programId } : {}),
       status,
     },
   });
@@ -52,7 +52,6 @@ async function deleteGroup(formData: FormData) {
   "use server";
   const id = formData.get("id")?.toString();
   if (!id) return;
-  await prisma.student.updateMany({ where: { groupId: id }, data: { groupId: null } });
   await prisma.report.deleteMany({ where: { groupId: id } });
   await prisma.group.delete({ where: { id } });
   revalidatePath("/admin/groups");
@@ -256,11 +255,7 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-3">
                 <h3 className="font-semibold text-gray-900">{group.name}</h3>
-                <span
-                  className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                    STATUS_COLORS[group.status] ?? "bg-gray-100 text-gray-600"
-                  }`}
-                >
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[group.status] ?? "bg-gray-100 text-gray-600"}`}>
                   {group.status}
                 </span>
               </div>
@@ -276,15 +271,12 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
               </div>
             </div>
 
-            {/* ✅ EDIT FORM — now includes programId */}
+            {/* Edit form */}
             <form action={updateGroup} className="grid grid-cols-6 gap-3">
               <input type="hidden" name="id" value={group.id} />
-
-              {/* Row 1: name, schedule, program */}
               <input
                 name="name"
                 defaultValue={group.name}
-                placeholder="Group name"
                 className="col-span-2 h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
               />
               <select
@@ -295,7 +287,6 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
                 <option value="MWF">MWF</option>
                 <option value="TTS">TTS</option>
               </select>
-              {/* ✅ Program selector */}
               <select
                 name="programId"
                 defaultValue={group.programId}
@@ -305,8 +296,6 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-
-              {/* Row 2: times, teacher, status */}
               <input
                 type="time"
                 name="startTime"
@@ -339,8 +328,6 @@ export default async function GroupsPage({ searchParams }: { searchParams: Promi
                 <option value="FINISHING">FINISHING</option>
                 <option value="EXPIRED">EXPIRED</option>
               </select>
-
-              {/* Save button */}
               <button className="col-span-6 h-10 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 transition">
                 Save Changes
               </button>

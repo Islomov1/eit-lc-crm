@@ -19,8 +19,8 @@ model User {
   parentInvites   ParentInvite[]   @relation("InvitesCreatedByUser")
   reports         Report[]         @relation("TeacherReports")
   supportSessions SupportSession[] @relation("SupportUser")
-  expenses Expense[] @relation("ExpensesCreatedBy")
-  payments Payment[]
+  expenses        Expense[]        @relation("ExpensesCreatedBy")
+  payments        Payment[]
 }
 
 model TelegramUpdate {
@@ -82,17 +82,16 @@ model Group {
 }
 
 model Student {
-  id                 String               @id @default(uuid())
-  name               String
-  createdAt          DateTime             @default(now())
-  groupId            String?
-  parents            Parent[]
-  payments           Payment[]
-  ParentInvite       ParentInvite[]
-  reports            Report[]
-  group              Group?               @relation(fields: [groupId], references: [id])
-  supportSessions    SupportSession[]
-  telegramDeliveries TelegramDelivery[]
+  id                   String               @id @default(uuid())
+  name                 String
+  createdAt            DateTime             @default(now())
+  groups               Group[]
+  parents              Parent[]
+  payments             Payment[]
+  ParentInvite         ParentInvite[]
+  reports              Report[]
+  supportSessions      SupportSession[]
+  telegramDeliveries   TelegramDelivery[]
   telegramPendingLinks TelegramPendingLink[]
 }
 
@@ -133,6 +132,7 @@ model TelegramPendingLink {
   @@index([studentId])
   @@index([status])
 }
+
 model Report {
   id         String           @id @default(uuid())
   date       DateTime         @default(now())
@@ -201,53 +201,45 @@ model TelegramDelivery {
 }
 
 model Payment {
-
-  id        String         @id @default(uuid())
-
+  id        String        @id @default(uuid())
   studentId String
-  student   Student        @relation(fields: [studentId], references: [id])
-
-
+  student   Student       @relation(fields: [studentId], references: [id])
   teacherId String?
-  teacher   User?          @relation(fields: [teacherId], references: [id])
-
+  teacher   User?         @relation(fields: [teacherId], references: [id])
   groupId   String?
-  group     Group?         @relation(fields: [groupId], references: [id])
-
-
-  periodStart DateTime
-  periodEnd   DateTime
-
-  classesIncluded Int      @default(12)
-  amount     Int           // UZS as int (after discount)
-  baseAmount Int           @default(0) // original price before discount
-  discountPct Int          @default(0) // 0–100
-  bonus      Int           @default(0) // bonus in UZS
-  status     PaymentStatus @default(PAID)
-  method     PaymentMethod
-
-  paidAt     DateTime      @default(now())
-  note       String?
-
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  group     Group?        @relation(fields: [groupId], references: [id])
+  periodStart     DateTime
+  periodEnd       DateTime
+  classesIncluded Int           @default(12)
+  amount          Int
+  baseAmount      Int           @default(0)
+  discountPct     Int           @default(0)
+  bonus           Int           @default(0)
+  status          PaymentStatus @default(PAID)
+  method          PaymentMethod
+  paidAt          DateTime      @default(now())
+  note            String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   @@unique([studentId, periodStart])
   @@index([teacherId, periodStart])
   @@index([studentId, periodStart])
   @@index([periodStart, periodEnd])
 }
+
 model Lead {
   id        String     @id @default(uuid())
   name      String
   phone     String?
-  source    String?    // "instagram" | "telegram" | "manual"
-  program   String?    // "IELTS" | "SAT" | "B2" etc
+  source    String?
+  program   String?
   status    LeadStatus @default(NEW)
   note      String?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 }
+
 model Expense {
   id          String   @id @default(uuid())
   amount      Int
