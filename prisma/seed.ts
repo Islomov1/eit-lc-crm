@@ -1,7 +1,6 @@
 // prisma/seed.ts
 import bcrypt from "bcryptjs";
 
-// CJS-compatible import for Prisma when ts-node runs in ESM mode
 import prismaPkg from "@prisma/client";
 const {
   PrismaClient,
@@ -15,7 +14,6 @@ const {
 const prisma = new PrismaClient();
 
 function dateKey(d = new Date()) {
-  // YYYY-MM-DD
   return d.toISOString().slice(0, 10);
 }
 
@@ -116,15 +114,24 @@ async function main() {
 
   /* ================= STUDENTS ================= */
   const ali = await prisma.student.create({
-    data: { name: "Ali Karimov", groupId: groupA1.id },
+    data: {
+      name: "Ali Karimov",
+      groups: { connect: { id: groupA1.id } },
+    },
   });
 
   const madina = await prisma.student.create({
-    data: { name: "Madina Saidova", groupId: groupIELTS.id },
+    data: {
+      name: "Madina Saidova",
+      groups: { connect: { id: groupIELTS.id } },
+    },
   });
 
   const aziz = await prisma.student.create({
-    data: { name: "Aziz Nurmatov", groupId: groupA1.id },
+    data: {
+      name: "Aziz Nurmatov",
+      groups: { connect: { id: groupA1.id } },
+    },
   });
 
   /* ================= PARENTS ================= */
