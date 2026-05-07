@@ -1,7 +1,5 @@
 import { NextRequest } from "next/server";
 import { PaymentStatus } from "@prisma/client";
-
-// CHANGE THIS LINE if needed:
 import { prisma } from "@/lib/prisma";
 
 function monthWindowFromYYYYMM(yyyyMm: string) {
@@ -36,9 +34,17 @@ export async function GET(req: NextRequest) {
   });
 
   const students = await prisma.student.findMany({
-    where: { group: { teacherId } },
+    where: { groups: { some: { teacherId } } },
     orderBy: [{ name: "asc" }],
-    select: { id: true, name: true, group: { select: { name: true } } },
+    select: {
+      id: true,
+      name: true,
+      groups: {
+        where: { teacherId },
+        select: { name: true },
+        take: 1,
+      },
+    },
   });
 
   const payments = await prisma.payment.findMany({
@@ -55,7 +61,7 @@ export async function GET(req: NextRequest) {
       <tr>
         <td>${idx + 1}</td>
         <td>${s.name}</td>
-        <td>${s.group?.name ?? "-"}</td>
+        <td>${s.groups[0]?.name ?? "-"}</td>
         <td>${paid ? "YES" : "NO"}</td>
         <td style="text-align:right">${p?.amount?.toLocaleString?.() ?? ""}</td>
         <td>${p?.status ?? ""}</td>
@@ -85,7 +91,6 @@ export async function GET(req: NextRequest) {
     <div><b>Teacher:</b> ${teacher?.name ?? "Unknown"}</div>
     <div><b>Month:</b> ${month}</div>
   </div>
-
   <table>
     <thead>
       <tr>
@@ -99,7 +104,7 @@ export async function GET(req: NextRequest) {
       </tr>
     </thead>
     <tbody>
-      ${rows.join("")}
+${rows.join("")}
     </tbody>
   </table>
 </body>
