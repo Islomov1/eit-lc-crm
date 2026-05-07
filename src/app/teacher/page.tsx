@@ -53,11 +53,14 @@ async function createReport(formData: FormData) {
     return;
   }
 
+  // ✅ groups instead of group
   const student = await prisma.student.findUnique({
     where: { id: studentId },
-    include: { parents: true, group: true },
+    include: { parents: true, groups: true },
   });
   if (!student) return;
+
+  const groupName = student.groups[0]?.name ?? "-"; // ✅
 
   const attendanceRu = attendanceValue === "PRESENT" ? "Присутствовал" : "Отсутствовал";
   const homeworkRu = homeworkValue === "DONE" ? "Выполнено полностью" : homeworkValue === "PARTIAL" ? "Выполнено частично" : "Не выполнено";
@@ -68,7 +71,7 @@ async function createReport(formData: FormData) {
 📚 ОТЧЁТ О ЗАНЯТИИ — EIT LC
 
 Ученик: ${student.name}
-Группа: ${student.group?.name ?? "-"}
+Группа: ${groupName}
 Посещаемость: ${attendanceRu}
 Домашнее задание: ${homeworkRu}
 Комментарий: ${comment || "Отсутствует"}
@@ -80,7 +83,7 @@ async function createReport(formData: FormData) {
 📚 DARS HISOBOTI — EIT LC
 
 O'quvchi: ${student.name}
-Guruh: ${student.group?.name ?? "-"}
+Guruh: ${groupName}
 Qatnashuv: ${attendanceUz}
 Uy vazifasi: ${homeworkUz}
 Izoh: ${comment || "Mavjud emas"}
@@ -240,58 +243,49 @@ export default async function TeacherPage({ searchParams }: Props) {
                         <input type="hidden" name="studentId" value={student.id} />
                         <input type="hidden" name="groupId" value={group.id} />
 
-                       <div className="grid items-center gap-3" style={{ gridTemplateColumns: "200px 120px 130px 1fr auto" }}>
-  {/* Name */}
-  <div className="font-medium text-gray-900 text-sm flex items-center gap-2 min-w-0">
-    {reported && <span className="text-green-500">✓</span>}
-    <span className="truncate">{student.name}</span>
-  </div>
-
-  {/* Attendance */}
-  <select
-    name="attendance"
-    defaultValue="PRESENT"
-    disabled={reported}
-    className="h-9 w-full border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50"
-  >
-    <option value="PRESENT">Present</option>
-    <option value="ABSENT">Absent</option>
-  </select>
-
-  {/* Homework */}
-  <select
-    name="homework"
-    defaultValue="DONE"
-    disabled={reported}
-    className="h-9 w-full border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50"
-  >
-    <option value="DONE">Done</option>
-    <option value="PARTIAL">Partial</option>
-    <option value="NOT_DONE">Not Done</option>
-  </select>
-
-  {/* Comment */}
-  <input
-    name="comment"
-    placeholder="Comment..."
-    disabled={reported}
-    className="h-9 w-full border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50"
-  />
-
-  {/* Button */}
-  {reported ? (
-    <div className="h-9 px-4 flex items-center rounded-xl bg-green-100 text-green-700 text-xs font-semibold whitespace-nowrap">
-      Sent ✓
-    </div>
-  ) : (
-    <button
-      type="submit"
-      className="h-9 px-5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition whitespace-nowrap"
-    >
-      Send
-    </button>
-  )}
-</div>
+                        <div className="grid items-center gap-3" style={{ gridTemplateColumns: "200px 120px 130px 1fr auto" }}>
+                          <div className="font-medium text-gray-900 text-sm flex items-center gap-2 min-w-0">
+                            {reported && <span className="text-green-500">✓</span>}
+                            <span className="truncate">{student.name}</span>
+                          </div>
+                          <select
+                            name="attendance"
+                            defaultValue="PRESENT"
+                            disabled={reported}
+                            className="h-9 w-full border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50"
+                          >
+                            <option value="PRESENT">Present</option>
+                            <option value="ABSENT">Absent</option>
+                          </select>
+                          <select
+                            name="homework"
+                            defaultValue="DONE"
+                            disabled={reported}
+                            className="h-9 w-full border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50"
+                          >
+                            <option value="DONE">Done</option>
+                            <option value="PARTIAL">Partial</option>
+                            <option value="NOT_DONE">Not Done</option>
+                          </select>
+                          <input
+                            name="comment"
+                            placeholder="Comment..."
+                            disabled={reported}
+                            className="h-9 w-full border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50"
+                          />
+                          {reported ? (
+                            <div className="h-9 px-4 flex items-center rounded-xl bg-green-100 text-green-700 text-xs font-semibold whitespace-nowrap">
+                              Sent ✓
+                            </div>
+                          ) : (
+                            <button
+                              type="submit"
+                              className="h-9 px-5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition whitespace-nowrap"
+                            >
+                              Send
+                            </button>
+                          )}
+                        </div>
                       </form>
                     );
                   })

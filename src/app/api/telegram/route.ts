@@ -88,9 +88,10 @@ export async function POST(req: Request) {
       if (callbackData.startsWith("link_yes:session:")) {
         const sessionId = callbackData.slice("link_yes:session:".length).trim();
 
+        // ✅ groups instead of group
         const pendingLinks = await prisma.telegramPendingLink.findMany({
           where: { sessionId, status: "PENDING" },
-          include: { parent: true, student: { include: { group: true } } },
+          include: { parent: true, student: { include: { groups: true } } },
         });
 
         if (pendingLinks.length === 0) {
@@ -104,13 +105,23 @@ export async function POST(req: Request) {
         await prisma.telegramPendingLink.updateMany({ where: { sessionId }, data: { status: "CONFIRMED" } });
         await Promise.all(pendingLinks.map((link) =>
           prisma.analyticsEvent.create({
-            data: { name: "parent_linked", actorType: "PARENT", actorId: link.parentId, studentId: link.studentId, groupId: link.student.groupId ?? undefined, props: { method: "contact_confirm", sessionId } },
+            data: {
+              name: "parent_linked",
+              actorType: "PARENT",
+              actorId: link.parentId,
+              studentId: link.studentId,
+              groupId: link.student.groups[0]?.id ?? undefined, // ✅
+              props: { method: "contact_confirm", sessionId },
+            },
           })
         ));
 
         await answerTelegramCallbackQuery(callbackId, "Подключено / Ulandi");
 
-        const childrenList = pendingLinks.map((l, i) => `${i + 1}. 👧/👦 ${l.student.name} — ${l.student.group?.name ?? "—"}`).join("\n");
+        // ✅ groups[0]?.name
+        const childrenList = pendingLinks.map((l, i) =>
+          `${i + 1}. 👧/👦 ${l.student.name} — ${l.student.groups[0]?.name ?? "—"}`
+        ).join("\n");
 
         await removeTelegramReplyKeyboard(
           chatId.toString(),
@@ -175,9 +186,10 @@ export async function POST(req: Request) {
 
       const phoneVariants = formatParentLookupVariants(contactPhone);
 
+      // ✅ groups instead of group
       const parents = await prisma.parent.findMany({
         where: { OR: phoneVariants.map((p) => ({ phone: p })) },
-        include: { student: { include: { group: true } } },
+        include: { student: { include: { groups: true } } },
       });
 
       if (parents.length === 0) {
@@ -189,10 +201,8 @@ export async function POST(req: Request) {
       const sessionId = randomUUID();
       const expiresAt = new Date(Date.now() + 1000 * 60 * 15);
 
-      // Expire old pending links from this chatId
       await prisma.telegramPendingLink.updateMany({ where: { chatId, status: "PENDING" }, data: { status: "REJECTED" } });
 
-      // Create one pending link per child
       await Promise.all(
         parents.map((parent) =>
           prisma.telegramPendingLink.create({
@@ -202,8 +212,15 @@ export async function POST(req: Request) {
       );
 
       const isSingle = parents.length === 1;
-      const childrenListRu = parents.map((p, i) => `${i + 1}. 👧/👦 ${p.student.name}\n    Группа: ${p.student.group?.name ?? "не назначена"}`).join("\n");
-      const childrenListUz = parents.map((p, i) => `${i + 1}. 👧/👦 ${p.student.name}\n    Guruh: ${p.student.group?.name ?? "belgilanmagan"}`).join("\n");
+
+      // ✅ groups[0]?.name
+      const childrenListRu = parents.map((p, i) =>
+        `${i + 1}. 👧/👦 ${p.student.name}\n    Группа: ${p.student.groups[0]?.name ?? "не назначена"}`
+      ).join("\n");
+
+      const childrenListUz = parents.map((p, i) =>
+        `${i + 1}. 👧/👦 ${p.student.name}\n    Guruh: ${p.student.groups[0]?.name ?? "belgilanmagan"}`
+      ).join("\n");
 
       const msgRu = isSingle
         ? `Подтвердите данные:\n\nЭто ваш ребёнок?\n${childrenListRu}\n\nНажмите «Да», если всё верно.`

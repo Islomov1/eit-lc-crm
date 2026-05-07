@@ -40,7 +40,7 @@ async function createSession(formData: FormData) {
       comment: comment?.trim() || null,
     },
     include: {
-      student: { include: { parents: true, group: true } },
+      student: { include: { parents: true, groups: true } }, // ✅
     },
   });
 
@@ -54,11 +54,13 @@ async function createSession(formData: FormData) {
         timeZone: "Asia/Tashkent",
       }).format(d);
 
+    const groupName = student.groups[0]?.name ?? "-"; // ✅
+
     const msg = `
 📚 ACADEMIC SUPPORT HISOBOTI — EIT LC
 
 O'quvchi: ${student.name}
-Guruh: ${student.group?.name ?? "-"}
+Guruh: ${groupName}
 Boshlanishi: ${fmt(startTime)}
 Tugashi: ${fmt(endTime)}
 Davomiyligi: ${durationHours.toFixed(2)} soat
@@ -73,7 +75,7 @@ Yubordi: ${support.name}
 📚 ОТЧЁТ ACADEMIC SUPPORT — EIT LC
 
 Ученик: ${student.name}
-Группа: ${student.group?.name ?? "-"}
+Группа: ${groupName}
 Начало: ${fmt(startTime)}
 Окончание: ${fmt(endTime)}
 Длительность: ${durationHours.toFixed(2)} ч
@@ -111,7 +113,7 @@ export default async function SupportPage() {
 
   const [students, sessions, monthlySessions] = await Promise.all([
     prisma.student.findMany({
-      include: { group: { select: { name: true } } },
+      include: { groups: { select: { name: true }, take: 1 } }, // ✅
       orderBy: { name: "asc" },
     }),
     prisma.supportSession.findMany({
@@ -133,7 +135,7 @@ export default async function SupportPage() {
   const preparedStudents = students.map((s) => ({
     id: s.id,
     name: s.name,
-    groupName: s.group?.name ?? null,
+    groupName: s.groups[0]?.name ?? null, // ✅
   }));
 
   const fmtTable = (d: Date) =>
@@ -164,7 +166,7 @@ export default async function SupportPage() {
         </div>
       </div>
 
-      {/* Session form with templates */}
+      {/* Session form */}
       <SupportSessionForm students={preparedStudents} action={createSession} />
 
       {/* Sessions table */}
