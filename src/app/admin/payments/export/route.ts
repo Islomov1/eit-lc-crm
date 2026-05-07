@@ -12,11 +12,7 @@ function monthWindowFromYYYYMM(yyyyMm: string) {
 }
 
 function safeSheetName(name: string) {
-  // Excel sheet name rules: max 31, no: : \ / ? * [ ]
-  return name
-    .replace(/[:\\/?*\[\]]/g, " ")
-    .trim()
-    .slice(0, 31) || "Sheet";
+  return name.replace(/[:\\/?*\[\]]/g, " ").trim().slice(0, 31) || "Sheet";
 }
 
 function yyyyMmDd(d: Date) {
@@ -30,13 +26,12 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
 
   const month = searchParams.get("month") || "";
-  const teacherId = searchParams.get("teacherId") || ""; // optional
+  const teacherId = searchParams.get("teacherId") || "";
 
   if (!month) return new Response("month is required (YYYY-MM)", { status: 400 });
 
   const { start } = monthWindowFromYYYYMM(month);
 
-  // Teachers to export
   const teachers = await prisma.user.findMany({
     where: {
       role: Role.TEACHER,
@@ -50,18 +45,21 @@ export async function GET(req: NextRequest) {
 
   const teacherIds = teachers.map((t) => t.id);
 
-  // Students for those teachers (via group.teacherId)
+  // ✅ Use groups (many-to-many)
   const students = await prisma.student.findMany({
-    where: { group: { teacherId: { in: teacherIds } } },
+    where: { groups: { some: { teacherId: { in: teacherIds } } } },
     orderBy: { name: "asc" },
     select: {
       id: true,
       name: true,
-      group: { select: { name: true, teacherId: true } },
+      groups: {
+        where: { teacherId: { in: teacherIds } },
+        select: { name: true, teacherId: true },
+        take: 1,
+      },
     },
   });
 
-  // Payments for month + those teachers
   const payments = await prisma.payment.findMany({
     where: {
       periodStart: start,
@@ -79,7 +77,6 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  // Build maps
   const paymentsByTeacher = new Map<string, Map<string, typeof payments[number]>>();
   for (const tId of teacherIds) paymentsByTeacher.set(tId, new Map());
   for (const p of payments) {
@@ -87,21 +84,20 @@ export async function GET(req: NextRequest) {
     paymentsByTeacher.get(p.teacherId)?.set(p.studentId, p);
   }
 
+  // ✅ Group students by teacher using groups[0]
   const studentsByTeacher = new Map<string, typeof students>();
   for (const tId of teacherIds) studentsByTeacher.set(tId, []);
   for (const s of students) {
-    const tId = s.group?.teacherId;
+    const tId = s.groups[0]?.teacherId;
     if (!tId) continue;
     if (!studentsByTeacher.has(tId)) studentsByTeacher.set(tId, []);
     studentsByTeacher.get(tId)!.push(s);
   }
 
-  // Workbook
   const wb = new ExcelJS.Workbook();
   wb.creator = "CRM";
   wb.created = new Date();
 
-  // Summary sheet
   const summary = wb.addWorksheet("Summary", {
     views: [{ state: "frozen", ySplit: 1 }],
   });
@@ -118,7 +114,6 @@ export async function GET(req: NextRequest) {
   summary.getRow(1).font = { bold: true };
   summary.getRow(1).alignment = { vertical: "middle" };
 
-  // One sheet per teacher
   for (const t of teachers) {
     const sheetName = safeSheetName(t.name);
     const ws = wb.addWorksheet(sheetName, {
@@ -136,7 +131,6 @@ export async function GET(req: NextRequest) {
       { header: "Paid date", key: "paidAt", width: 12 },
     ];
 
-    // Header styling
     const headerRow = ws.getRow(1);
     headerRow.font = { bold: true, color: { argb: "FF374151" } };
     headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
@@ -151,16 +145,12 @@ export async function GET(req: NextRequest) {
 
     tStudents.forEach((s, i) => {
       const p = tPayMap.get(s.id);
-
-      const isPaid =
-        !!p && (p.status === PaymentStatus.PAID || p.status === PaymentStatus.PARTIAL);
-
+      const isPaid = !!p && (p.status === PaymentStatus.PAID || p.status === PaymentStatus.PARTIAL);
       const amount = p?.amount ?? 0;
       const status = p?.status ?? "";
       const method = p?.method ?? "";
       const paidAt = p?.paidAt ? yyyyMmDd(new Date(p.paidAt)) : "";
 
-      // Count totals only for PAID / PARTIAL
       if (p && (p.status === PaymentStatus.PAID || p.status === PaymentStatus.PARTIAL)) {
         totalCollected += amount;
         paymentCount += 1;
@@ -169,7 +159,7 @@ export async function GET(req: NextRequest) {
       ws.addRow({
         idx: i + 1,
         student: s.name,
-        group: s.group?.name ?? "-",
+        group: s.groups[0]?.name ?? "-", // ✅ use groups[0]
         paid: isPaid ? "PAID" : "NOT PAID",
         amount: amount || "",
         status,
@@ -178,54 +168,36 @@ export async function GET(req: NextRequest) {
       });
     });
 
-    // Amount formatting
     ws.getColumn("amount").numFmt = "#,##0";
 
-    // Conditional formatting for Paid column (green/red)
-    // Column D is Paid
     if (tStudents.length > 0) {
       const fromRow = 2;
       const toRow = tStudents.length + 1;
-    ws.addConditionalFormatting({
-  ref: `D${fromRow}:D${toRow}`,
-  rules: [
-    {
-      type: "expression",
-      priority: 1,
-      formulae: [`$D${fromRow}="PAID"`],
-      style: {
-        fill: {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FFD1FAE5" }, // green
-        },
-        font: {
-          color: { argb: "FF065F46" },
-          bold: true,
-        },
-      },
-    },
-    {
-      type: "expression",
-      priority: 2,
-      formulae: [`$D${fromRow}="NOT PAID"`],
-      style: {
-        fill: {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FFFEE2E2" }, // red
-        },
-        font: {
-          color: { argb: "FF991B1B" },
-          bold: true,
-        },
-      },
-    },
-  ],
-});
+      ws.addConditionalFormatting({
+        ref: `D${fromRow}:D${toRow}`,
+        rules: [
+          {
+            type: "expression",
+            priority: 1,
+            formulae: [`$D${fromRow}="PAID"`],
+            style: {
+              fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFD1FAE5" } },
+              font: { color: { argb: "FF065F46" }, bold: true },
+            },
+          },
+          {
+            type: "expression",
+            priority: 2,
+            formulae: [`$D${fromRow}="NOT PAID"`],
+            style: {
+              fill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEE2E2" } },
+              font: { color: { argb: "FF991B1B" }, bold: true },
+            },
+          },
+        ],
+      });
     }
 
-    // Total row at bottom (auto)
     const lastDataRow = Math.max(1, tStudents.length + 1);
     const totalRowIndex = lastDataRow + 1;
 
@@ -233,14 +205,10 @@ export async function GET(req: NextRequest) {
     ws.getCell(`A${totalRowIndex}`).font = { bold: true };
     ws.mergeCells(`A${totalRowIndex}:D${totalRowIndex}`);
 
-    // SUM amounts column E
-    ws.getCell(`E${totalRowIndex}`).value = {
-      formula: `SUM(E2:E${lastDataRow})`,
-    };
+    ws.getCell(`E${totalRowIndex}`).value = { formula: `SUM(E2:E${lastDataRow})` };
     ws.getCell(`E${totalRowIndex}`).numFmt = "#,##0";
     ws.getCell(`E${totalRowIndex}`).font = { bold: true };
 
-    // Subtle total row fill
     for (let c = 1; c <= 8; c++) {
       const cell = ws.getRow(totalRowIndex).getCell(c);
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
@@ -250,7 +218,6 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    // Add to summary
     const teacher40 = Math.round(totalCollected * 0.4);
     const center60 = totalCollected - teacher40;
 
@@ -264,12 +231,10 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // Summary styling + formats
   summary.getColumn("total").numFmt = "#,##0";
   summary.getColumn("t40").numFmt = "#,##0";
   summary.getColumn("c60").numFmt = "#,##0";
 
-  // Summary totals row
   const sumLast = summary.rowCount;
   const sumTotalRow = summary.addRow({
     teacher: "TOTAL",
@@ -283,7 +248,6 @@ export async function GET(req: NextRequest) {
   sumTotalRow.font = { bold: true };
   sumTotalRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF9FAFB" } };
 
-  // Generate buffer
   const buffer = await wb.xlsx.writeBuffer();
 
   const filename = teacherId
