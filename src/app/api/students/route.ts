@@ -11,14 +11,11 @@ export async function GET() {
     const cookieStore = await cookies();
     const userId = cookieStore.get("userId")?.value;
     const role = cookieStore.get("userRole")?.value;
-
     if (!userId || !role) return forbidden();
-    // Decide your rules:
-    // Admin + Support can see all, Teacher maybe only their group students (needs more logic)
     if (role !== "ADMIN" && role !== "SUPPORT") return forbidden();
 
     const students = await prisma.student.findMany({
-      include: { group: true },
+      include: { groups: true }, // ✅ was: group
       orderBy: { createdAt: "desc" },
     });
 
@@ -34,13 +31,11 @@ export async function POST(req: Request) {
     const cookieStore = await cookies();
     const userId = cookieStore.get("userId")?.value;
     const role = cookieStore.get("userRole")?.value;
-
     if (!userId || !role) return forbidden();
     if (role !== "ADMIN" && role !== "SUPPORT") return forbidden();
 
     const body = await req.json().catch(() => null);
     const name = typeof body?.name === "string" ? body.name.trim() : "";
-
     if (!name) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
     }
