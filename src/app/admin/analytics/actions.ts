@@ -14,7 +14,6 @@ function dateKeyRange(year: number, month: number) {
   const y = String(year);
   const m = String(month).padStart(2, "0");
   const startKey = `${y}-${m}-01`;
-  // dateKey is YYYY-MM-DD string, so we compare < next month's first day key
   const nextMonth = month === 12 ? 1 : month + 1;
   const nextYear = month === 12 ? year + 1 : year;
   const endKey = `${String(nextYear)}-${String(nextMonth).padStart(2, "0")}-01`;
@@ -32,7 +31,6 @@ export async function getAnalyticsData(monthStr: string, year: number) {
   const yearStart = new Date(year, 0, 1);
   const yearEnd = new Date(year + 1, 0, 1);
 
-  // ── All queries in parallel ───────────────────────────────
   const [
     reports,
     yearPayments,
@@ -44,7 +42,7 @@ export async function getAnalyticsData(monthStr: string, year: number) {
     totalGroups,
     monthRevenueAgg,
   ] = await Promise.all([
-    // 1. Reports for selected month (by dateKey — correct range)
+    // 1. Reports for selected month
     prisma.report.findMany({
       where: { dateKey: { gte: startKey, lt: endKey } },
       select: { attendance: true, groupId: true, group: { select: { name: true } } },
@@ -59,13 +57,16 @@ export async function getAnalyticsData(monthStr: string, year: number) {
       select: { periodStart: true, amount: true },
     }),
 
-    // 3. All active students (in a group)
+    // 3. All active students (in at least one group) ✅
     prisma.student.findMany({
-      where: { groupId: { not: null } },
+      where: { groups: { some: {} } },
       select: {
         id: true,
         name: true,
-        group: { select: { name: true, teacher: { select: { name: true } } } },
+        groups: {
+          select: { name: true, teacher: { select: { name: true } } },
+          take: 1,
+        },
       },
       orderBy: { name: "asc" },
     }),
@@ -88,13 +89,13 @@ export async function getAnalyticsData(monthStr: string, year: number) {
       select: { teacherId: true, attendance: true, homework: true },
     }),
 
-    // 7. Summary: total students
-    prisma.student.count({ where: { groupId: { not: null } } }),
+    // 7. Total students ✅
+    prisma.student.count({ where: { groups: { some: {} } } }),
 
-    // 8. Summary: active groups
+    // 8. Active groups
     prisma.group.count({ where: { status: { in: ["ACTIVE", "NEW"] } } }),
 
-    // 9. Month revenue aggregate
+    // 9. Month revenue
     prisma.payment.aggregate({
       where: { periodStart: monthStart, status: { in: ["PAID", "PARTIAL"] } },
       _sum: { amount: true },
@@ -128,15 +129,15 @@ export async function getAnalyticsData(monthStr: string, year: number) {
 
   const yearTotalRevenue = yearPayments.reduce((s, p) => s + p.amount, 0);
 
-  // ── 3. Unpaid students ────────────────────────────────────
+  // ── 3. Unpaid students ✅ ─────────────────────────────────
   const paidSet = new Set(paidThisMonth.map((p) => p.studentId));
   const unpaidStudents = allActiveStudents
     .filter((s) => !paidSet.has(s.id))
     .map((s) => ({
       id: s.id,
       name: s.name,
-      group: s.group?.name ?? "—",
-      teacher: s.group?.teacher?.name ?? "—",
+      group: s.groups[0]?.name ?? "—",
+      teacher: s.groups[0]?.teacher?.name ?? "—",
     }));
 
   // ── 4. Teacher KPI ────────────────────────────────────────
@@ -171,4 +172,4 @@ export async function getAnalyticsData(monthStr: string, year: number) {
     unpaidStudents,
     teacherKpi,
   };
-}  
+}
