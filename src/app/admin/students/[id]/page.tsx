@@ -31,12 +31,10 @@ export default async function StudentPage(props: { params: Promise<{ id: string 
   const params = await props.params;
   if (!params?.id) redirect("/admin/students");
 
-  // Rely on /admin layout for auth/role
-
   const student = await prisma.student.findUnique({
     where: { id: params.id },
     include: {
-      group: true,
+      groups: true, // ✅ was: group
       parents: true,
       reports: {
         include: { teacher: true },
@@ -53,7 +51,6 @@ export default async function StudentPage(props: { params: Promise<{ id: string 
 
   const totalReports = student.reports.length;
   const presentCount = student.reports.filter((r) => r.attendance === "PRESENT").length;
-
   const attendancePercent =
     totalReports > 0 ? ((presentCount / totalReports) * 100).toFixed(1) : "0";
 
@@ -61,7 +58,12 @@ export default async function StudentPage(props: { params: Promise<{ id: string 
     <div className="min-h-screen bg-gray-100 p-10 space-y-8">
       <div className="bg-white p-6 rounded-2xl shadow">
         <h1 className="text-2xl font-bold mb-2">{student.name}</h1>
-        <p className="text-gray-600">Group: {student.group?.name || "Not assigned"}</p>
+        {/* ✅ Show all groups */}
+        <p className="text-gray-600">
+          {student.groups.length === 0
+            ? "No groups assigned"
+            : "Groups: " + student.groups.map((g) => g.name).join(", ")}
+        </p>
         <p className="text-gray-600">Attendance: {attendancePercent}%</p>
       </div>
 
@@ -97,18 +99,15 @@ export default async function StudentPage(props: { params: Promise<{ id: string 
               <th></th>
             </tr>
           </thead>
-
           <tbody>
             {student.reports.map((report) => (
               <tr key={report.id} className="border-b">
                 <td className="py-2">{report.dateKey ?? report.date.toLocaleDateString()}</td>
                 <td>{report.teacher.name}</td>
-
                 <td colSpan={4}>
                   <form action={updateReport} className="flex gap-2 items-center">
                     <input type="hidden" name="id" value={report.id} />
                     <input type="hidden" name="studentId" value={student.id} />
-
                     <select
                       name="attendance"
                       defaultValue={report.attendance}
@@ -117,7 +116,6 @@ export default async function StudentPage(props: { params: Promise<{ id: string 
                       <option value="PRESENT">Present</option>
                       <option value="ABSENT">Absent</option>
                     </select>
-
                     <select
                       name="homework"
                       defaultValue={report.homework}
@@ -127,13 +125,11 @@ export default async function StudentPage(props: { params: Promise<{ id: string 
                       <option value="PARTIAL">Partial</option>
                       <option value="NOT_DONE">Not Done</option>
                     </select>
-
                     <input
                       name="comment"
                       defaultValue={report.comment || ""}
                       className="border p-1 rounded text-sm flex-1"
                     />
-
                     <button className="text-blue-600 text-sm hover:underline">Save</button>
                   </form>
                 </td>
@@ -161,7 +157,6 @@ export default async function StudentPage(props: { params: Promise<{ id: string 
             {student.supportSessions.map((session) => {
               const hours =
                 (session.endTime.getTime() - session.startTime.getTime()) / (1000 * 60 * 60);
-
               return (
                 <tr key={session.id} className="border-b">
                   <td className="py-2">{session.startTime.toLocaleDateString()}</td>
