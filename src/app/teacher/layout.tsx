@@ -21,7 +21,6 @@ export default async function TeacherLayout({ children }: { children: React.Reac
 
   return (
     <div className="min-h-screen flex bg-gray-50">
-
       {/* Sidebar */}
       <aside className="w-64 bg-white shadow-sm border-r border-gray-100 flex flex-col h-screen sticky top-0">
 
@@ -50,6 +49,12 @@ export default async function TeacherLayout({ children }: { children: React.Reac
             className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition"
           >
             <span>📚</span> My Groups
+          </Link>
+          <Link
+            href="/teacher/students"
+            className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-gray-900 transition"
+          >
+            <span>👥</span> My Students
           </Link>
         </nav>
 
