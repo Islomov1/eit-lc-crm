@@ -283,28 +283,7 @@ export default async function TeacherStudentsPage() {
                       Save
                     </button>
 
-                    {/* Remove from group */}
-                    {studentGroup && (
-                      <button
-                        type="submit"
-                        formAction={removeFromGroup}
-                        name="studentId"
-                        value={student.id}
-                        className="h-9 px-4 rounded-xl bg-red-50 text-red-500 text-sm font-semibold hover:bg-red-100 transition border border-red-100"
-                        onClick={(e) => {
-                          const form = e.currentTarget.closest("form");
-                          if (form) {
-                            const input = document.createElement("input");
-                            input.type = "hidden";
-                            input.name = "groupId";
-                            input.value = studentGroup.id;
-                            form.appendChild(input);
-                          }
-                        }}
-                      >
-                        Remove from group
-                      </button>
-                    )}
+                   
                   </form>
                 </div>
 
