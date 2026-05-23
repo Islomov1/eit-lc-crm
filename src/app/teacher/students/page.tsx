@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { TeacherStudentCard } from "@/components/TeacherStudentCard";
 
 export const revalidate = 30;
 
@@ -154,100 +155,23 @@ export default async function TeacherStudentsPage() {
 
       {/* Student list */}
       {students.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400">No students in your groups yet.</div>
+        <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400">
+          No students in your groups yet.
+        </div>
       ) : (
         <div className="space-y-3">
           {students.map((student) => {
             const isPaid = student.payments.some((p) => p.status === "PAID" || p.status === "PARTIAL");
-            const studentGroup = student.groups[0];
-
             return (
-              <div key={student.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-
-                {/* Header */}
-                <div className="px-6 py-4 flex items-center gap-4 flex-wrap">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0" style={{ background: "#f3f4f6", color: "#6b7280" }}>
-                    {student.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-bold text-gray-900 text-base">{student.name}</p>
-                    <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      {student.groups.map((g) => (
-                        <span key={g.id} style={{ background: "#ede9fe", color: "#6d28d9", padding: "2px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 600 }}>{g.name}</span>
-                      ))}
-                      <span style={{ background: isPaid ? "#dcfce7" : "#fee2e2", color: isPaid ? "#166534" : "#991b1b", padding: "2px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 600 }}>
-                        {isPaid ? "✓ Paid" : "✗ Not paid"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Edit name + change group */}
-                <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50">
-                  <form action={updateStudent} className="flex gap-2 flex-wrap items-center">
-                    <input type="hidden" name="id" value={student.id} />
-                    <input type="hidden" name="oldGroupId" value={studentGroup?.id ?? ""} />
-                    <input name="name" defaultValue={student.name} className="h-9 border border-gray-200 rounded-xl px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[160px] flex-1" />
-                    <select name="newGroupId" defaultValue={studentGroup?.id ?? ""} className="h-9 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 w-44">
-                      {myGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-                    </select>
-                    <button type="submit" className="h-9 px-4 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">Save</button>
-                  </form>
-                </div>
-
-                {/* Remove from group — separate form, no event handlers */}
-                {studentGroup && (
-                  <div className="px-6 py-2 bg-gray-50/50 border-t border-dashed border-gray-100">
-                    <form action={removeFromGroup} className="inline">
-                      <input type="hidden" name="studentId" value={student.id} />
-                      <input type="hidden" name="groupId" value={studentGroup.id} />
-                      <button type="submit" className="text-xs font-semibold text-red-400 hover:text-red-600 transition">
-                        Remove from {studentGroup.name}
-                      </button>
-                    </form>
-                  </div>
-                )}
-
-                {/* Parents */}
-                {student.parents.length > 0 && (
-                  <div className="border-t border-gray-100">
-                    {student.parents.map((parent) => (
-                      <div key={parent.id} className="flex items-center justify-between gap-3 px-6 py-3 border-b border-gray-50 last:border-0">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0" style={{ background: "#f3f4f6", color: "#6b7280" }}>
-                            {parent.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-gray-800">{parent.name}</p>
-                            <p className="text-xs text-gray-400">{parent.phone}</p>
-                          </div>
-                          <span style={{ background: parent.telegramId ? "#dcfce7" : "#f3f4f6", color: parent.telegramId ? "#166534" : "#9ca3af", padding: "1px 8px", borderRadius: "999px", fontSize: "11px", fontWeight: 600 }}>
-                            {parent.telegramId ? "✓ TG" : "No TG"}
-                          </span>
-                        </div>
-                        <form action={removeParent}>
-                          <input type="hidden" name="id" value={parent.id} />
-                          <button className="text-xs text-red-400 hover:text-red-600 transition font-medium">Remove</button>
-                        </form>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Add parent */}
-                <div className="px-6 py-3 border-t border-gray-100">
-                  <details>
-                    <summary className="list-none cursor-pointer text-sm text-gray-400 hover:text-gray-700 transition font-medium">+ Add parent</summary>
-                    <form action={addParent} className="flex gap-2 flex-wrap items-center mt-3">
-                      <input type="hidden" name="studentId" value={student.id} />
-                      <input name="name" placeholder="Parent name" required className="h-9 border border-gray-200 rounded-xl px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[140px] flex-1" />
-                      <input name="phone" placeholder="+998..." required className="h-9 border border-gray-200 rounded-xl px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[140px] flex-1" />
-                      <button className="h-9 px-4 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">Add</button>
-                    </form>
-                  </details>
-                </div>
-
-              </div>
+              <TeacherStudentCard
+                key={student.id}
+                student={{ ...student, isPaid }}
+                allGroups={myGroups}
+                updateStudent={updateStudent}
+                removeFromGroup={removeFromGroup}
+                addParent={addParent}
+                removeParent={removeParent}
+              />
             );
           })}
         </div>

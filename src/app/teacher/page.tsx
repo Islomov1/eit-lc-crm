@@ -1,374 +1,300 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import Link from "next/link";
+import { AttendanceStatus, HomeworkStatus, ScheduleType } from "@prisma/client";
+import { sendTelegramToStudentParents } from "@/lib/telegramDelivery";
 import { prisma } from "@/lib/prisma";
-
-export const revalidate = 30;
 
 /* ── helpers ─────────────────────────────────────────────── */
 
-function currentYYYYMM() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+function getLocalDateKey(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
-/* ── server actions ──────────────────────────────────────── */
+function formatToday(date: Date) {
+  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "long", year: "numeric" }).format(date);
+}
 
-async function createStudent(formData: FormData) {
+/* ── create report ───────────────────────────────────────── */
+
+async function createReport(formData: FormData) {
   "use server";
+
   const cookieStore = await cookies();
   const teacherId = cookieStore.get("userId")?.value;
-  if (!teacherId) return;
-
-  const name = formData.get("name")?.toString().trim();
+  const studentId = formData.get("studentId")?.toString();
   const groupId = formData.get("groupId")?.toString();
-  if (!name || !groupId) return;
+  const attendance = formData.get("attendance")?.toString();
+  const homework = formData.get("homework")?.toString();
+  const comment = formData.get("comment")?.toString();
 
-  // Verify teacher owns this group
-  const group = await prisma.group.findFirst({ where: { id: groupId, teacherId } });
-  if (!group) return;
+  if (!teacherId || !studentId || !groupId || !attendance || !homework) return;
 
-  await prisma.student.create({
-    data: { name, groups: { connect: { id: groupId } } },
+  const teacher = await prisma.user.findUnique({
+    where: { id: teacherId },
+    select: { id: true, name: true, role: true },
   });
-  revalidatePath("/teacher/students");
-}
+  if (!teacher || teacher.role !== "TEACHER") return;
 
-async function updateStudent(formData: FormData) {
-  "use server";
-  const cookieStore = await cookies();
-  const teacherId = cookieStore.get("userId")?.value;
-  if (!teacherId) return;
+  const attendanceValue = attendance as AttendanceStatus;
+  const homeworkValue = homework as HomeworkStatus;
+  const dateKey = getLocalDateKey(new Date());
 
-  const id = formData.get("id")?.toString();
-  const name = formData.get("name")?.toString().trim();
-  const newGroupId = formData.get("newGroupId")?.toString();
-  const oldGroupId = formData.get("oldGroupId")?.toString();
-  if (!id || !name) return;
-
-  // Verify teacher owns the group
-  if (newGroupId) {
-    const group = await prisma.group.findFirst({ where: { id: newGroupId, teacherId } });
-    if (!group) return;
+  let report;
+  try {
+    report = await prisma.report.create({
+      data: { studentId, teacherId: teacher.id, groupId, dateKey, attendance: attendanceValue, homework: homeworkValue, comment },
+    });
+  } catch {
+    return;
   }
 
-  await prisma.student.update({
-    where: { id },
-    data: {
-      name,
-      ...(newGroupId && oldGroupId && newGroupId !== oldGroupId
-        ? { groups: { disconnect: { id: oldGroupId }, connect: { id: newGroupId } } }
-        : {}),
-    },
-  });
-  revalidatePath("/teacher/students");
-}
-
-async function removeFromGroup(formData: FormData) {
-  "use server";
-  const cookieStore = await cookies();
-  const teacherId = cookieStore.get("userId")?.value;
-  if (!teacherId) return;
-
-  const studentId = formData.get("studentId")?.toString();
-  const groupId = formData.get("groupId")?.toString();
-  if (!studentId || !groupId) return;
-
-  // Verify teacher owns the group
-  const group = await prisma.group.findFirst({ where: { id: groupId, teacherId } });
-  if (!group) return;
-
-  await prisma.student.update({
+  // ✅ groups instead of group
+  const student = await prisma.student.findUnique({
     where: { id: studentId },
-    data: { groups: { disconnect: { id: groupId } } },
+    include: { parents: true, groups: true },
   });
-  revalidatePath("/teacher/students");
-}
+  if (!student) return;
 
-async function addParent(formData: FormData) {
-  "use server";
-  const cookieStore = await cookies();
-  const teacherId = cookieStore.get("userId")?.value;
-  if (!teacherId) return;
+  const groupName = student.groups[0]?.name ?? "-"; // ✅
 
-  const studentId = formData.get("studentId")?.toString();
-  const name = formData.get("name")?.toString().trim();
-  const phone = formData.get("phone")?.toString().trim();
-  if (!studentId || !name || !phone) return;
+  const attendanceRu = attendanceValue === "PRESENT" ? "Присутствовал" : "Отсутствовал";
+  const homeworkRu = homeworkValue === "DONE" ? "Выполнено полностью" : homeworkValue === "PARTIAL" ? "Выполнено частично" : "Не выполнено";
+  const attendanceUz = attendanceValue === "PRESENT" ? "Darsda qatnashdi" : "Darsda qatnashmadi";
+  const homeworkUz = homeworkValue === "DONE" ? "To'liq bajarilgan" : homeworkValue === "PARTIAL" ? "Qisman bajarilgan" : "Bajarilmagan";
 
-  await prisma.parent.create({ data: { name, phone, studentId } });
-  revalidatePath("/teacher/students");
-}
+  const message = `
+📚 ОТЧЁТ О ЗАНЯТИИ — EIT LC
 
-async function removeParent(formData: FormData) {
-  "use server";
-  const cookieStore = await cookies();
-  const teacherId = cookieStore.get("userId")?.value;
-  if (!teacherId) return;
+Ученик: ${student.name}
+Группа: ${groupName}
+Посещаемость: ${attendanceRu}
+Домашнее задание: ${homeworkRu}
+Комментарий: ${comment || "Отсутствует"}
 
-  const id = formData.get("id")?.toString();
-  if (!id) return;
+Отправил(а): ${teacher.name}
 
-  await prisma.parent.delete({ where: { id } });
-  revalidatePath("/teacher/students");
+—————————————
+
+📚 DARS HISOBOTI — EIT LC
+
+O'quvchi: ${student.name}
+Guruh: ${groupName}
+Qatnashuv: ${attendanceUz}
+Uy vazifasi: ${homeworkUz}
+Izoh: ${comment || "Mavjud emas"}
+
+Yubordi: ${teacher.name}
+`.trim();
+
+  await sendTelegramToStudentParents(
+    studentId,
+    message,
+    { type: "USER", id: teacher.id },
+    { sourceType: "REPORT", sourceId: report.id }
+  );
+
+  revalidatePath("/teacher");
 }
 
 /* ── page ────────────────────────────────────────────────── */
 
-export default async function TeacherStudentsPage() {
+type Props = { searchParams?: Promise<{ schedule?: string }> };
+
+export default async function TeacherPage({ searchParams }: Props) {
   const cookieStore = await cookies();
   const userId = cookieStore.get("userId")?.value;
   if (!userId) redirect("/login");
 
-  const teacher = await prisma.user.findUnique({ where: { id: userId } });
+  const selectedSchedule: ScheduleType =
+    (await searchParams)?.schedule === "TTS" ? "TTS" : "MWF";
+
+  const [teacher, groups] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId } }),
+    prisma.group.findMany({
+      where: { schedule: selectedSchedule },
+      include: { students: { orderBy: { name: "asc" } } },
+      orderBy: [{ startTime: "asc" }, { name: "asc" }],
+    }),
+  ]);
+
   if (!teacher || teacher.role !== "TEACHER") redirect("/login");
 
-  const month = currentYYYYMM();
-  const [y, m] = month.split("-").map(Number);
-  const periodStart = new Date(y, m - 1, 1);
+  const myGroups = groups.filter((g) => g.teacherId === teacher.id);
+  const today = new Date();
+  const dateKey = getLocalDateKey(today);
 
-  // All groups belonging to this teacher
-  const myGroups = await prisma.group.findMany({
-    where: { teacherId: userId },
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
-  });
-
-  const groupIds = myGroups.map((g) => g.id);
-
-  // All students in teacher's groups
-  const students = await prisma.student.findMany({
-    where: { groups: { some: { id: { in: groupIds } } } },
-    include: {
-      groups: {
-        where: { id: { in: groupIds } },
-        select: { id: true, name: true },
-      },
-      parents: { select: { id: true, name: true, phone: true, telegramId: true } },
-      payments: {
-        where: { periodStart, teacherId: userId },
-        select: { status: true },
-      },
+  const todayReports = await prisma.report.findMany({
+    where: {
+      teacherId: teacher.id,
+      dateKey,
+      groupId: { in: myGroups.map((g) => g.id) },
     },
-    orderBy: { name: "asc" },
+    select: { studentId: true },
   });
+
+  const reportedStudentIds = new Set(todayReports.map((r) => r.studentId));
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6">
 
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">My Students</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {students.length} students across {myGroups.length} groups
-          </p>
+          <h1 className="text-2xl font-bold text-gray-900">My Groups</h1>
+          <p className="text-sm text-gray-500 mt-1">{formatToday(today)}</p>
+        </div>
+
+        {/* Schedule tabs */}
+        <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1">
+          {(["MWF", "TTS"] as ScheduleType[]).map((s) => (
+            <Link
+              key={s}
+              href={`/teacher?schedule=${s}`}
+              className={`px-5 py-2 rounded-lg text-sm font-semibold transition ${
+                selectedSchedule === s
+                  ? "bg-gray-900 text-white shadow-sm"
+                  : "text-gray-500 hover:text-gray-900"
+              }`}
+            >
+              {s}
+            </Link>
+          ))}
         </div>
       </div>
 
-      {/* Add new student */}
-      <details className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden group">
-        <summary className="px-6 py-4 cursor-pointer text-sm font-semibold text-gray-700 hover:bg-gray-50 transition list-none flex items-center justify-between">
-          <span>+ Add New Student</span>
-          <span className="text-gray-400 text-xs">▼</span>
-        </summary>
-        <div className="px-6 pb-5 pt-2 border-t border-gray-100">
-          <form action={createStudent} className="flex gap-3 flex-wrap items-end">
-            <div className="flex-1 min-w-[180px] space-y-1">
-              <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Name</label>
-              <input
-                name="name"
-                placeholder="Student full name"
-                required
-                className="h-10 w-full border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              />
-            </div>
-            <div className="w-48 space-y-1">
-              <label className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Group</label>
-              <select
-                name="groupId"
-                required
-                defaultValue=""
-                className="h-10 w-full border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              >
-                <option value="" disabled>Select group</option>
-                {myGroups.map((g) => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
-            </div>
-            <button className="h-10 px-6 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">
-              Create
-            </button>
-          </form>
+      {/* Summary cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 text-center">
+          <p className="text-2xl font-bold text-gray-900">{myGroups.length}</p>
+          <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wide">Groups</p>
         </div>
-      </details>
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 text-center">
+          <p className="text-2xl font-bold text-gray-900">
+            {myGroups.reduce((s, g) => s + g.students.length, 0)}
+          </p>
+          <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wide">Students</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 text-center">
+          <p className="text-2xl font-bold text-green-600">{reportedStudentIds.size}</p>
+          <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wide">Reported</p>
+        </div>
+      </div>
 
-      {/* Student list */}
-      {students.length === 0 ? (
+      {/* Empty state */}
+      {myGroups.length === 0 && (
         <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center text-gray-400">
-          No students in your groups yet.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {students.map((student) => {
-            const isPaid = student.payments.some(
-              (p) => p.status === "PAID" || p.status === "PARTIAL"
-            );
-            const studentGroup = student.groups[0];
-
-            return (
-              <div key={student.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-
-                {/* Student header */}
-                <div className="px-6 py-4 flex items-center justify-between gap-4 flex-wrap">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
-                      style={{ background: "#f3f4f6", color: "#6b7280" }}
-                    >
-                      {student.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-bold text-gray-900 text-base">{student.name}</p>
-                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                        {student.groups.map((g) => (
-                          <span
-                            key={g.id}
-                            style={{ background: "#ede9fe", color: "#6d28d9", padding: "1px 8px", borderRadius: "999px", fontSize: "11px", fontWeight: 600 }}
-                          >
-                            {g.name}
-                          </span>
-                        ))}
-                        <span
-                          style={{
-                            background: isPaid ? "#dcfce7" : "#fee2e2",
-                            color: isPaid ? "#166534" : "#991b1b",
-                            padding: "1px 8px",
-                            borderRadius: "999px",
-                            fontSize: "11px",
-                            fontWeight: 600,
-                          }}
-                        >
-                          {isPaid ? "✓ Paid" : "✗ Not paid"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Edit name + change group */}
-                <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50">
-                  <form action={updateStudent} className="flex gap-2 flex-wrap items-center">
-                    <input type="hidden" name="id" value={student.id} />
-                    <input type="hidden" name="oldGroupId" value={studentGroup?.id ?? ""} />
-                    <input
-                      name="name"
-                      defaultValue={student.name}
-                      className="h-9 border border-gray-200 rounded-xl px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[160px] flex-1"
-                    />
-                    <select
-                      name="newGroupId"
-                      defaultValue={studentGroup?.id ?? ""}
-                      className="h-9 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 w-44"
-                    >
-                      {myGroups.map((g) => (
-                        <option key={g.id} value={g.id}>{g.name}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="submit"
-                      className="h-9 px-4 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition"
-                    >
-                      Save
-                    </button>
-
-                   
-                  </form>
-                </div>
-
-                {/* Remove from group — separate form to avoid conflict */}
-                {studentGroup && (
-                  <div className="px-6 pb-3 bg-gray-50/50">
-                    <form action={removeFromGroup} className="inline">
-                      <input type="hidden" name="studentId" value={student.id} />
-                      <input type="hidden" name="groupId" value={studentGroup.id} />
-                    </form>
-                  </div>
-                )}
-
-                {/* Parents */}
-                {student.parents.length > 0 && (
-                  <div className="border-t border-gray-100">
-                    {student.parents.map((parent) => (
-                      <div key={parent.id} className="flex items-center justify-between gap-3 px-6 py-3 border-b border-gray-50 last:border-0">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div
-                            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
-                            style={{ background: "#f3f4f6", color: "#6b7280" }}
-                          >
-                            {parent.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-gray-800">{parent.name}</p>
-                            <p className="text-xs text-gray-400">{parent.phone}</p>
-                          </div>
-                          <span
-                            style={{
-                              background: parent.telegramId ? "#dcfce7" : "#f3f4f6",
-                              color: parent.telegramId ? "#166534" : "#9ca3af",
-                              padding: "1px 8px",
-                              borderRadius: "999px",
-                              fontSize: "11px",
-                              fontWeight: 600,
-                            }}
-                          >
-                            {parent.telegramId ? "✓ TG" : "No TG"}
-                          </span>
-                        </div>
-                        <form action={removeParent}>
-                          <input type="hidden" name="id" value={parent.id} />
-                          <button className="text-xs text-red-400 hover:text-red-600 transition font-medium">
-                            Remove
-                          </button>
-                        </form>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Add parent */}
-                <div className="px-6 py-3 border-t border-gray-100">
-                  <details className="group/parent">
-                    <summary className="list-none cursor-pointer text-sm text-gray-400 hover:text-gray-700 transition font-medium">
-                      + Add parent
-                    </summary>
-                    <form action={addParent} className="flex gap-2 flex-wrap items-center mt-3">
-                      <input type="hidden" name="studentId" value={student.id} />
-                      <input
-                        name="name"
-                        placeholder="Parent name"
-                        required
-                        className="h-9 border border-gray-200 rounded-xl px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[140px] flex-1"
-                      />
-                      <input
-                        name="phone"
-                        placeholder="+998..."
-                        required
-                        className="h-9 border border-gray-200 rounded-xl px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[140px] flex-1"
-                      />
-                      <button className="h-9 px-4 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">
-                        Add
-                      </button>
-                    </form>
-                  </details>
-                </div>
-
-              </div>
-            );
-          })}
+          No groups assigned for <strong>{selectedSchedule}</strong> schedule.
         </div>
       )}
+
+      {/* Groups */}
+      <div className="space-y-4">
+        {myGroups.map((group) => {
+          const reportedCount = group.students.filter((s) => reportedStudentIds.has(s.id)).length;
+          const allDone = reportedCount === group.students.length && group.students.length > 0;
+
+          return (
+            <details
+              key={group.id}
+              className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
+              open
+            >
+              <summary className="list-none cursor-pointer px-5 py-4 border-b border-gray-100 hover:bg-gray-50 transition">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <h2 className="font-semibold text-gray-900">{group.name}</h2>
+                      {allDone && (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">
+                          ✓ All done
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      {group.schedule} · {group.startTime}–{group.endTime} · {group.students.length} students
+                      {reportedCount > 0 && (
+                        <span className="ml-2 text-green-600 font-medium">· {reportedCount} reported</span>
+                      )}
+                    </p>
+                  </div>
+                  <span className="text-xs text-gray-400 flex-shrink-0">▼</span>
+                </div>
+              </summary>
+
+              <div className="p-4 space-y-2">
+                {group.students.length === 0 ? (
+                  <p className="text-gray-400 text-sm p-2">No students in this group.</p>
+                ) : (
+                  group.students.map((student) => {
+                    const reported = reportedStudentIds.has(student.id);
+                    return (
+                      <form
+                        key={student.id}
+                        action={createReport}
+                        className={`rounded-xl px-4 py-3 border transition ${
+                          reported ? "bg-green-50 border-green-200 opacity-60" : "bg-gray-50 border-gray-200"
+                        }`}
+                      >
+                        <input type="hidden" name="studentId" value={student.id} />
+                        <input type="hidden" name="groupId" value={group.id} />
+
+                        <div className="grid items-center gap-3" style={{ gridTemplateColumns: "200px 120px 130px 1fr auto" }}>
+                          <div className="font-medium text-gray-900 text-sm flex items-center gap-2 min-w-0">
+                            {reported && <span className="text-green-500">✓</span>}
+                            <span className="truncate">{student.name}</span>
+                          </div>
+                          <select
+                            name="attendance"
+                            defaultValue="PRESENT"
+                            disabled={reported}
+                            className="h-9 w-full border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50"
+                          >
+                            <option value="PRESENT">Present</option>
+                            <option value="ABSENT">Absent</option>
+                          </select>
+                          <select
+                            name="homework"
+                            defaultValue="DONE"
+                            disabled={reported}
+                            className="h-9 w-full border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50"
+                          >
+                            <option value="DONE">Done</option>
+                            <option value="PARTIAL">Partial</option>
+                            <option value="NOT_DONE">Not Done</option>
+                          </select>
+                          <input
+                            name="comment"
+                            placeholder="Comment..."
+                            disabled={reported}
+                            className="h-9 w-full border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50"
+                          />
+                          {reported ? (
+                            <div className="h-9 px-4 flex items-center rounded-xl bg-green-100 text-green-700 text-xs font-semibold whitespace-nowrap">
+                              Sent ✓
+                            </div>
+                          ) : (
+                            <button
+                              type="submit"
+                              className="h-9 px-5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition whitespace-nowrap"
+                            >
+                              Send
+                            </button>
+                          )}
+                        </div>
+                      </form>
+                    );
+                  })
+                )}
+              </div>
+            </details>
+          );
+        })}
+      </div>
     </div>
   );
 }
