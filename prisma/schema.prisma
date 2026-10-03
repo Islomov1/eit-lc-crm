@@ -79,6 +79,7 @@ model Group {
   program    Program      @relation(fields: [programId], references: [id])
   teacher    User?        @relation("TeacherGroups", fields: [teacherId], references: [id])
   reports    Report[]
+  lessons    Lesson[]
   students   Student[]
   payments   Payment[]
   archivedAt DateTime?
@@ -100,6 +101,7 @@ model Student {
   payments             Payment[]
   ParentInvite         ParentInvite[]
   reports              Report[]
+  lessonStudents       LessonStudent[]
   supportSessions      SupportSession[]
   telegramDeliveries   TelegramDelivery[]
   telegramPendingLinks TelegramPendingLink[]
@@ -108,6 +110,8 @@ model Student {
 }
 
 model Parent {
+  reportLanguage       String                @default("BOTH")
+  weeklyReports        Boolean               @default(true)
   id                   String                @id @default(uuid())
   name                 String
   phone                String
@@ -146,6 +150,12 @@ model TelegramPendingLink {
 }
 
 model Report {
+  topic      String?
+  covered    String?
+  assignment String?
+  version    Int              @default(1)
+  updatedAt  DateTime         @default(now()) @updatedAt
+  revisions  ReportRevision[]
   id         String           @id @default(uuid())
   date       DateTime         @default(now())
   dateKey    String
@@ -183,6 +193,9 @@ model Program {
 }
 
 model TelegramDelivery {
+  autoRetry         Boolean                @default(false)
+  cancelledAt       DateTime?
+  sourceVersion     Int?
   id                String                 @id @default(uuid())
   studentId         String
   parentId          String
@@ -415,4 +428,57 @@ enum PaymentStatus {
   PARTIAL
   REFUND
   VOID
+}
+
+model ReportRevision {
+  id        String   @id @default(uuid())
+  reportId  String
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  version   Int
+  actorId   String
+  actorName String
+  reason    String
+  before    Json?
+  after     Json
+  createdAt DateTime @default(now())
+
+  @@unique([reportId, version])
+}
+
+model Lesson {
+  id          String   @id @default(uuid())
+  groupId     String
+  group       Group    @relation(fields: [groupId], references: [id])
+  dateKey     String
+  endTime     String
+  topic       String?
+  covered     String?
+  assignment  String?
+  cancelledAt DateTime?
+  cancelReason String?
+  createdAt   DateTime @default(now())
+  students    LessonStudent[]
+
+  @@unique([groupId, dateKey])
+  @@index([dateKey])
+}
+
+model LessonStudent {
+  lessonId  String
+  studentId String
+  lesson    Lesson  @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  student   Student @relation(fields: [studentId], references: [id])
+
+  @@id([lessonId, studentId])
+  @@index([studentId])
+}
+
+model ReportAutomation {
+  id               String    @id @default("parent-reports")
+  trackingStartsOn String
+  enabled          Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  lastRunAt        DateTime?
+  lastSuccessAt    DateTime?
+  lastError        String?
 }

@@ -14,6 +14,8 @@ async function retry(f: FormData) {
   const row = await prisma.telegramDelivery.findUniqueOrThrow({
     where: { id },
   });
+  if (row.cancelledAt)
+    throw new Error("Сообщение отменено или заменено новой версией");
   if (row.attemptCount >= 10)
     throw new Error(
       "Достигнут предел попыток. Проверьте подключение родителя.",
@@ -57,7 +59,7 @@ export default async function Integrations({
   const status = ["FAILED", "PENDING", "SENT"].includes(sp.status || "")
     ? (sp.status as "FAILED" | "PENDING" | "SENT")
     : undefined;
-  const where = status ? { status } : {};
+  const where = { cancelledAt: null, ...(status ? { status } : {}) };
   const [deliveries, total, stats, linked, parents, errors, forms] =
     await Promise.all([
       prisma.telegramDelivery.findMany({
@@ -73,6 +75,7 @@ export default async function Integrations({
       prisma.telegramDelivery.count({ where }),
       prisma.telegramDelivery.groupBy({
         by: ["status"],
+        where: { cancelledAt: null },
         _count: { _all: true },
       }),
       prisma.parent.count({ where: { telegramId: { not: null } } }),
@@ -110,7 +113,7 @@ export default async function Integrations({
             <span className="metric-label">
               {
                 {
-                  SENT: "Доставлено",
+                  SENT: "Отправлено в Telegram",
                   FAILED: "Ошибки доставки",
                   PENDING: "Ожидают отправки",
                 }[s]
@@ -130,7 +133,8 @@ export default async function Integrations({
           : "нужна настройка ключа"}
         . Обратные события CRM → Make:{" "}
         {process.env.MAKE_WEBHOOK_URL ? "настроены" : "не настроены"}. Повторная
-        отправка Telegram запускается вручную из журнала.
+        отправка новых сообщений проверяется ежедневно, 09:00–10:00 по
+        Самарканду. Старые ошибки доступны для ручной проверки.
       </div>
       {errors.length > 0 && (
         <section className="panel" style={{ marginBottom: 24 }}>
@@ -197,7 +201,7 @@ export default async function Integrations({
                   >
                     {
                       {
-                        SENT: "Доставлено",
+                        SENT: "Отправлено в Telegram",
                         FAILED: "Ошибка",
                         PENDING: "В очереди",
                       }[d.status]

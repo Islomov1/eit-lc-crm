@@ -116,6 +116,7 @@ after(async () => {
       OR: [{ actorId: { startsWith: prefix } }, { entityId: { in: ids } }],
     },
   });
+  await p.lesson.deleteMany({ where: { groupId: { startsWith: prefix } } });
   await p.student.deleteMany({ where: { id: { in: ids } } });
   await p.group.deleteMany({ where: { id: { startsWith: prefix } } });
   await p.program.deleteMany({ where: { id: { startsWith: prefix } } });

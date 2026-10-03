@@ -1,3 +1,4 @@
+import { ReportEditor } from "@/components/ReportEditor";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
@@ -11,7 +12,6 @@ import {
   saveParent,
   unlinkParent,
   createInvite,
-  updateReport,
 } from "../actions";
 export default async function StudentPage({
   params,
@@ -44,6 +44,7 @@ export default async function StudentPage({
         take: 20,
         skip: (page - 1) * 20,
         include: {
+          revisions: { orderBy: { version: "desc" } },
           group: { select: { name: true } },
           teacher: { select: { name: true } },
         },
@@ -190,6 +191,24 @@ export default async function StudentPage({
                   <span>Телефон</span>
                   <input name="phone" defaultValue={p.phone} required />
                 </label>
+                <label className="field">
+                  <span>Язык отчётов</span>
+                  <select name="reportLanguage" defaultValue={p.reportLanguage}>
+                    <option value="BOTH">Русский + O‘zbekcha</option>
+                    <option value="RU">Русский</option>
+                    <option value="UZ">O‘zbekcha</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Недельная сводка</span>
+                  <select
+                    name="weeklyReports"
+                    defaultValue={p.weeklyReports ? "1" : "0"}
+                  >
+                    <option value="1">Включена</option>
+                    <option value="0">Отключена</option>
+                  </select>
+                </label>
                 <button className="btn">Сохранить контакт</button>
               </ActionForm>
               {p.telegramId && (
@@ -215,6 +234,15 @@ export default async function StudentPage({
                 <span>Телефон</span>
                 <input name="phone" type="tel" required />
               </label>
+              <label className="field">
+                <span>Язык отчётов</span>
+                <select name="reportLanguage" defaultValue="BOTH">
+                  <option value="BOTH">Русский + O‘zbekcha</option>
+                  <option value="RU">Русский</option>
+                  <option value="UZ">O‘zbekcha</option>
+                </select>
+              </label>
+              <input name="weeklyReports" type="hidden" value="1" />
               <button className="btn">Добавить</button>
             </ActionForm>
           </details>
@@ -296,30 +324,12 @@ export default async function StudentPage({
                     : "не выполнено"}
               </span>
             </summary>
-            <ActionForm action={updateReport} className="form-grid">
-              <input name="id" type="hidden" value={r.id} />
-              <input name="studentId" type="hidden" value={id} />
-              <label className="field">
-                <span>Посещаемость</span>
-                <select name="attendance" defaultValue={r.attendance}>
-                  <option value="PRESENT">Присутствовал</option>
-                  <option value="ABSENT">Отсутствовал</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Домашнее задание</span>
-                <select name="homework" defaultValue={r.homework}>
-                  <option value="DONE">Выполнено</option>
-                  <option value="PARTIAL">Частично</option>
-                  <option value="NOT_DONE">Не выполнено</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Комментарий</span>
-                <input name="comment" defaultValue={r.comment || ""} />
-              </label>
-              <button className="btn">Исправить отметку</button>
-            </ActionForm>
+            <ReportEditor
+              studentId={id}
+              groupId={r.groupId}
+              dateKey={r.dateKey}
+              report={r}
+            />
           </details>
         ))}
         {!reports.length && <p className="empty">Отметок пока нет</p>}

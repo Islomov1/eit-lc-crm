@@ -15,12 +15,23 @@ export async function deliverOne(id: string) {
   const d = await prisma.telegramDelivery.findUnique({
     where: { id },
     include: {
-      parent: { select: { telegramId: true } },
+      parent: { select: { telegramId: true, weeklyReports: true } },
       student: { select: { archivedAt: true } },
     },
   });
   if (!d) return { status: "SKIPPED" as const };
   if (d.status === "SENT") return { status: "SENT" as const };
+  if (d.sourceType === "WEEKLY_REPORT" && !d.parent.weeklyReports) {
+    await prisma.telegramDelivery.update({
+      where: { id },
+      data: {
+        cancelledAt: new Date(),
+        error: "Родитель отключил недельные сводки",
+      },
+    });
+    return { status: "SKIPPED" as const };
+  }
+  if (d.cancelledAt) return { status: "SKIPPED" as const };
   if (d.parent.telegramId !== d.chatId || d.student.archivedAt) {
     await prisma.telegramDelivery.update({
       where: { id },
@@ -34,9 +45,25 @@ export async function deliverOne(id: string) {
     return { status: "FAILED" as const };
   }
   const now = new Date();
+  if (d.sourceType === "REPORT" && d.sourceVersion) {
+    const previous = await prisma.telegramDelivery.findFirst({
+      where: {
+        parentId: d.parentId,
+        sourceType: "REPORT",
+        sourceId: d.sourceId,
+        sourceVersion: { lt: d.sourceVersion },
+        status: { not: "SENT" },
+        lastAttemptAt: { gt: new Date(+now - 60000) },
+        nextRetryAt: { gt: now },
+      },
+    });
+    // A correction must not overtake an older version already in flight.
+    if (previous) return { status: "SKIPPED" as const };
+  }
   const claim = await prisma.telegramDelivery.updateMany({
     where: {
       id,
+      cancelledAt: null,
       status: { in: ["PENDING", "FAILED"] },
       attemptCount: { lt: 10 },
       OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: now } }],
@@ -130,6 +157,7 @@ export async function sendTelegramToStudentParents(
       sourceType: options.sourceType || null,
       sourceId: options.sourceId || null,
       idempotencyKey: key,
+      autoRetry: true,
     })),
     skipDuplicates: true,
   });
@@ -148,9 +176,11 @@ export async function sendTelegramToStudentParents(
     results,
   };
 }
-export async function retryDeliveries(limit = 25) {
+export async function retryDeliveries(limit = 25, automatic = false) {
   const rows = await prisma.telegramDelivery.findMany({
     where: {
+      cancelledAt: null,
+      ...(automatic ? { autoRetry: true } : {}),
       status: { in: ["FAILED", "PENDING"] },
       attemptCount: { lt: 10 },
       OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: new Date() } }],
@@ -160,7 +190,31 @@ export async function retryDeliveries(limit = 25) {
     take: Math.min(50, Math.max(1, limit)),
   });
   const results = [];
-  for (const row of rows)
-    results.push({ id: row.id, ...(await deliverOne(row.id)) });
+  for (let i = 0; i < rows.length; i += 5) {
+    results.push(
+      ...(await Promise.all(
+        rows
+          .slice(i, i + 5)
+          .map(async (row) => ({ id: row.id, ...(await deliverOne(row.id)) })),
+      )),
+    );
+  }
   return results;
+}
+
+export async function deliverReport(id: string, version: number) {
+  const rows = await prisma.telegramDelivery.findMany({
+    where: {
+      sourceType: "REPORT",
+      sourceId: id,
+      sourceVersion: version,
+      cancelledAt: null,
+    },
+    select: { id: true },
+  });
+  const results = await Promise.all(rows.map((row) => deliverOne(row.id)));
+  if (results.some((r) => r.status === "SKIPPED")) {
+    await new Promise((resolve) => setTimeout(resolve, 11000));
+    await Promise.all(rows.map((row) => deliverOne(row.id)));
+  }
 }

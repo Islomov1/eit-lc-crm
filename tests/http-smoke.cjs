@@ -57,6 +57,7 @@ async function request(path, cookie, expected = 200) {
     for (const route of [
       "/admin",
       "/admin/leads",
+      "/admin/parent-reports",
       "/admin/students",
       "/admin/groups",
       "/admin/timetable",

@@ -27,6 +27,7 @@ const allLinks = [
   ["/admin/students", "Ученики", Users],
   ["/admin/groups", "Группы", Layers],
   ["/admin/timetable", "Расписание", CalendarDays],
+  ["/admin/parent-reports", "Отчёты родителям", ClipboardCheck],
   ["/admin/attendance", "Посещаемость", ClipboardCheck],
   ["/admin/payments", "Оплаты", Wallet],
   ["/admin/support", "Поддержка", GraduationCap],

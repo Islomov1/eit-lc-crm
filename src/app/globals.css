@@ -972,3 +972,16 @@ details[open] > .details-summary::after {
     transition: none !important;
   }
 }
+
+/* Parent reports */
+.lesson-panel { margin-bottom: 24px; }
+.lesson-details { background: var(--surface, #f6f5ef); border-radius: 18px; padding: 18px; margin: 16px 0; }
+.lesson-details > summary, .report-history > summary { cursor: pointer; font-weight: 600; }
+.lesson-details .muted { margin: 12px 0; }
+.student-report { border-top: 1px solid #e3e5dd; padding: 14px 0; }
+.student-report > .details-summary { gap: 12px; }
+.student-report .form-grid { margin-top: 18px; }
+.report-history { margin-top: 18px; }
+.report-history p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.parent-message { white-space: pre-wrap; overflow-wrap: anywhere; background: #f6f5ef; padding: 20px; border-radius: 18px; font: inherit; line-height: 1.65; }
+@media(max-width:600px) { .student-report > .details-summary { align-items: flex-start; flex-direction: column; } }

@@ -108,6 +108,12 @@ export async function saveParent(f: FormData) {
   const name = textField(f, "name");
   const phone = textField(f, "phone", 50);
   if (!name || !phone) throw new Error("Укажите имя и телефон родителя");
+  const reportLanguage = ["RU", "UZ", "BOTH"].includes(
+    textField(f, "reportLanguage"),
+  )
+    ? textField(f, "reportLanguage")
+    : "BOTH";
+  const weeklyReports = f.get("weeklyReports") === "1";
   await prisma.$transaction(async (tx) => {
     if (id) {
       const p = await tx.parent.findFirst({ where: { id, studentId } });
@@ -122,11 +128,15 @@ export async function saveParent(f: FormData) {
         data: {
           name,
           phone,
+          reportLanguage,
+          weeklyReports,
           ...(p.phone !== phone ? { telegramId: null } : {}),
         },
       });
     } else {
-      await tx.parent.create({ data: { studentId, name, phone } });
+      await tx.parent.create({
+        data: { studentId, name, phone, reportLanguage, weeklyReports },
+      });
     }
     await tx.auditLog.create({
       data: {
@@ -182,39 +192,4 @@ export async function createInvite(f: FormData) {
     },
   });
   redirect(`/admin/students/${studentId}?invite=${invite.code}`);
-}
-export async function updateReport(f: FormData) {
-  const actor = await requireRole("ADMIN", "DIRECTOR");
-  const id = textField(f, "id");
-  const studentId = textField(f, "studentId");
-  const attendance = textField(f, "attendance");
-  const homework = textField(f, "homework");
-  if (
-    !["PRESENT", "ABSENT"].includes(attendance) ||
-    !["DONE", "PARTIAL", "NOT_DONE"].includes(homework)
-  )
-    throw new Error("Некорректная отметка");
-  await prisma.$transaction(async (tx) => {
-    const r = await tx.report.findFirst({ where: { id, studentId } });
-    if (!r) throw new Error("Отчёт не найден");
-    await tx.report.update({
-      where: { id },
-      data: {
-        attendance: attendance as "PRESENT" | "ABSENT",
-        homework: homework as "DONE" | "PARTIAL" | "NOT_DONE",
-        comment: textField(f, "comment", 2000),
-      },
-    });
-    await tx.auditLog.create({
-      data: {
-        actorId: actor.id,
-        actorName: actor.name,
-        action: "REPORT",
-        entity: "Student",
-        entityId: studentId,
-        summary: `Исправлена отметка ${r.dateKey}: ${attendance}, ${homework}`,
-      },
-    });
-  });
-  refresh(studentId);
 }

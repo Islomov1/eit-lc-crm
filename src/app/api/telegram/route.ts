@@ -1,3 +1,7 @@
+import {
+  preferenceButtons,
+  setParentPreference,
+} from "@/lib/parent-preferences";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
@@ -109,6 +113,24 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true });
       const chatId = BigInt(chatRaw["id"]);
 
+      if (
+        callbackData.startsWith("reports_language:") ||
+        callbackData.startsWith("reports_weekly:")
+      ) {
+        const count = await setParentPreference(chatId, callbackData);
+        await answerTelegramCallbackQuery(
+          callbackId,
+          count
+            ? "Настройки сохранены / Sozlamalar saqlandi"
+            : "Сначала подключите ребёнка / Avval farzandingizni ulang",
+        );
+        await prisma.telegramUpdate.update({
+          where: { updateId },
+          data: { status: "PROCESSED", processedAt: new Date() },
+        });
+        return NextResponse.json({ ok: true });
+      }
+
       // link_yes:session:<sessionId>
       if (callbackData.startsWith("link_yes:session:")) {
         const sessionId = callbackData.slice("link_yes:session:".length).trim();
@@ -190,6 +212,12 @@ export async function POST(req: Request) {
         await removeTelegramReplyKeyboard(
           chatId.toString(),
           `✅ Подключение подтверждено!\n\nВаши дети:\n${childrenList}\n\nТеперь вы будете получать отчёты от EIT LC.\n\n✅ Ulanish tasdiqlandi!\n\nSizning farzandlaringiz:\n${childrenList}\n\nEndi siz EIT LC dan xabarlarni olasiz.`,
+        );
+
+        await sendTelegramMessageWithInlineKeyboard(
+          chatId.toString(),
+          "Выберите язык будущих отчётов и недельные сводки. Настройки: /settings\n\nKelgusi hisobotlar tilini va haftalik xulosalarni tanlang. Sozlamalar: /settings",
+          preferenceButtons,
         );
 
         await prisma.telegramUpdate.update({
@@ -278,6 +306,31 @@ export async function POST(req: Request) {
         : null;
     const text =
       typeof messageRaw["text"] === "string" ? messageRaw["text"] : "";
+
+    if (
+      (text === "/settings" || text === "/language") &&
+      fromId === Number(chatId)
+    ) {
+      const parent = await prisma.parent.findFirst({
+        where: { telegramId: chatId, student: { archivedAt: null } },
+      });
+      if (parent)
+        await sendTelegramMessageWithInlineKeyboard(
+          chatId.toString(),
+          `Язык отчётов: ${parent.reportLanguage}. Недельная сводка: ${parent.weeklyReports ? "включена" : "отключена"}.\nHisobot tili va haftalik xulosa sozlamalari.\nИзменения применяются к новым отчётам. / Yangi hisobotlarga qo‘llaniladi.`,
+          preferenceButtons,
+        );
+      else
+        await sendTelegramMessage(
+          chatId.toString(),
+          "Сначала подключите ребёнка: /start\nAvval farzandingizni ulang: /start",
+        );
+      await prisma.telegramUpdate.update({
+        where: { updateId },
+        data: { status: "PROCESSED", processedAt: new Date() },
+      });
+      return NextResponse.json({ ok: true });
+    }
 
     // /start
     if (text.startsWith("/start")) {

@@ -1,5 +1,5 @@
 import { requireRole } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { periodSummary } from "@/lib/report-summary";
 import { dateKey, monthWindow, pageNumber } from "@/lib/format";
 import Link from "next/link";
 import Pagination from "@/components/Pagination";
@@ -15,22 +15,21 @@ export default async function AttendancePage({
   const { month, end } = monthWindow(sp.month || dateKey().slice(0, 7));
   const startKey = month + "-01";
   const endKey = end.toISOString().slice(0, 10);
-  const [rows, count] = await Promise.all([
-    prisma.$queryRaw<
-      {
-        id: string;
-        name: string;
-        groupName: string;
-        groupId: string;
-        total: bigint;
-        present: bigint;
-        homework: bigint;
-      }[]
-    >`SELECT s.id,s.name,g.id AS "groupId",g.name AS "groupName",COUNT(*) AS total,COUNT(*) FILTER(WHERE r.attendance='PRESENT') AS present,COUNT(*) FILTER(WHERE r.homework='DONE') AS homework FROM "Report" r JOIN "Student" s ON s.id=r."studentId" JOIN "Group" g ON g.id=r."groupId" WHERE r."dateKey">=${startKey} AND r."dateKey"<${endKey} GROUP BY s.id,s.name,g.id,g.name ORDER BY s.name,g.name LIMIT 30 OFFSET ${(page - 1) * 30}`,
-    prisma.$queryRaw<
-      { total: bigint }[]
-    >`SELECT COUNT(*) AS total FROM (SELECT DISTINCT "studentId","groupId" FROM "Report" WHERE "dateKey">=${startKey} AND "dateKey"<${endKey}) x`,
-  ]);
+  const allRows = await periodSummary(startKey, endKey);
+  const rows = allRows
+    .slice((page - 1) * 30, page * 30)
+    .map((r) => ({
+      id: r.studentId,
+      name: r.studentName,
+      groupId: r.groupId,
+      groupName: r.groupName,
+      total: r.marked,
+      present: r.present,
+      homework: r.done,
+      missing: r.missing,
+      expected: r.expected,
+      legacy: r.legacy,
+    }));
   return (
     <>
       <header className="page-header">
@@ -49,6 +48,11 @@ export default async function AttendancePage({
           <button className="btn">Показать</button>
         </form>
       </header>
+      <div className="notice">
+        Незаполненные отчёты не считаются пропусками. До начала нового учёта
+        доступны только внесённые отметки.{" "}
+        <Link href="/admin/parent-reports">Проверить полноту отчётов →</Link>
+      </div>
       <div className="table-wrap">
         <table>
           <thead>
@@ -57,6 +61,7 @@ export default async function AttendancePage({
               <th>Группа</th>
               <th>Занятий отмечено</th>
               <th>Присутствовал</th>
+              <th>Не заполнено</th>
               <th>Посещаемость</th>
               <th>ДЗ выполнено</th>
             </tr>
@@ -72,6 +77,7 @@ export default async function AttendancePage({
                 <td>{r.groupName}</td>
                 <td>{Number(r.total)}</td>
                 <td>{Number(r.present)}</td>
+                <td>{r.missing}</td>
                 <td>
                   <span
                     className={
@@ -81,7 +87,11 @@ export default async function AttendancePage({
                         : "red")
                     }
                   >
-                    {Math.round((Number(r.present) / Number(r.total)) * 100)}%
+                    {r.missing
+                      ? "Данные неполные"
+                      : r.total
+                        ? Math.round((r.present / r.total) * 100) + "%"
+                        : "—"}
                   </span>
                 </td>
                 <td>{Number(r.homework)}</td>
@@ -95,7 +105,7 @@ export default async function AttendancePage({
       </div>
       <Pagination
         page={page}
-        total={Number(count[0].total)}
+        total={allRows.length}
         base="/admin/attendance"
         params={{ month }}
       />
