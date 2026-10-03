@@ -1,7 +1,7 @@
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { debtSummary } from "@/lib/dashboard";
-import { dateKey, money, monthWindow } from "@/lib/format";
+import { dateKey, money, monthWindow, sqlTimestamp } from "@/lib/format";
 import Link from "next/link";
 export default async function Analytics({
   searchParams,
@@ -39,7 +39,7 @@ export default async function Analytics({
       >`SELECT u.name,COUNT(*) AS total,COUNT(*) FILTER(WHERE r.attendance='PRESENT') AS present,COUNT(*) FILTER(WHERE r.homework='DONE') AS homework FROM "Report" r JOIN "User" u ON u.id=r."teacherId" WHERE r."dateKey">=${month + "-01"} AND r."dateKey"<${end.toISOString().slice(0, 10)} GROUP BY u.id,u.name ORDER BY u.name`,
       prisma.$queryRaw<
         { month: string; amount: bigint }[]
-      >`SELECT to_char("periodStart",'YYYY-MM') AS month,SUM("paidAmount")::bigint AS amount FROM "Payment" WHERE "periodStart">=${new Date(Date.UTC(start.getUTCFullYear(), 0, 1))} AND "periodStart"<${new Date(Date.UTC(start.getUTCFullYear() + 1, 0, 1))} AND status IN ('PAID','PARTIAL') GROUP BY month ORDER BY month`,
+      >`SELECT to_char("periodStart",'YYYY-MM') AS month,SUM("paidAmount")::bigint AS amount FROM "Payment" WHERE "periodStart">=${sqlTimestamp(new Date(Date.UTC(start.getUTCFullYear(), 0, 1)))}::timestamp AND "periodStart"<${sqlTimestamp(new Date(Date.UTC(start.getUTCFullYear() + 1, 0, 1)))}::timestamp AND status IN ('PAID','PARTIAL') GROUP BY month ORDER BY month`,
       debtSummary(month),
     ]);
   const received = revenue._sum.paidAmount || 0;

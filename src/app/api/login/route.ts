@@ -1,3 +1,4 @@
+import { sqlTimestamp } from "@/lib/format";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
@@ -23,7 +24,7 @@ export async function POST(req: Request) {
     // Atomic fixed window also prevents concurrent requests from bypassing the limit.
     const attempts = await prisma.$queryRaw<
       { count: number }[]
-    >`INSERT INTO "LoginAttempt" ("key", "count", "expiresAt") VALUES (${key}, 1, ${new Date(now.getTime() + 900000)}) ON CONFLICT ("key") DO UPDATE SET "count" = CASE WHEN "LoginAttempt"."expiresAt" < ${now} THEN 1 ELSE "LoginAttempt"."count" + 1 END, "expiresAt" = CASE WHEN "LoginAttempt"."expiresAt" < ${now} THEN ${new Date(now.getTime() + 900000)} ELSE "LoginAttempt"."expiresAt" END RETURNING "count"`;
+    >`INSERT INTO "LoginAttempt" ("key", "count", "expiresAt") VALUES (${key}, 1, ${sqlTimestamp(new Date(now.getTime() + 900000))}::timestamp) ON CONFLICT ("key") DO UPDATE SET "count" = CASE WHEN "LoginAttempt"."expiresAt" < ${sqlTimestamp(now)}::timestamp THEN 1 ELSE "LoginAttempt"."count" + 1 END, "expiresAt" = CASE WHEN "LoginAttempt"."expiresAt" < ${sqlTimestamp(now)}::timestamp THEN ${sqlTimestamp(new Date(now.getTime() + 900000))}::timestamp ELSE "LoginAttempt"."expiresAt" END RETURNING "count"`;
     if (attempts[0].count > 10)
       return NextResponse.json(
         { error: "Слишком много попыток. Повторите через 15 минут." },

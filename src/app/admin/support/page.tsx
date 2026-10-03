@@ -1,6 +1,6 @@
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { dateKey, monthWindow } from "@/lib/format";
+import { dateKey, monthWindow, sqlTimestamp } from "@/lib/format";
 import Link from "next/link";
 export default async function SupportReport({
   searchParams,
@@ -13,7 +13,7 @@ export default async function SupportReport({
   );
   const rows = await prisma.$queryRaw<
     { id: string; name: string; sessions: bigint; minutes: number }[]
-  >`SELECT u.id,u.name,COUNT(s.id) AS sessions,COALESCE(SUM(EXTRACT(EPOCH FROM (s."endTime"-s."startTime"))/60),0)::float AS minutes FROM "User" u LEFT JOIN "SupportSession" s ON s."supportId"=u.id AND s."startTime">=${start} AND s."startTime"<${end} WHERE u.role='SUPPORT' GROUP BY u.id,u.name ORDER BY u.name`;
+  >`SELECT u.id,u.name,COUNT(s.id) AS sessions,COALESCE(SUM(EXTRACT(EPOCH FROM (s."endTime"-s."startTime"))/60),0)::float AS minutes FROM "User" u LEFT JOIN "SupportSession" s ON s."supportId"=u.id AND s."startTime">=${sqlTimestamp(start)}::timestamp AND s."startTime"<${sqlTimestamp(end)}::timestamp WHERE u.role='SUPPORT' GROUP BY u.id,u.name ORDER BY u.name`;
   return (
     <>
       <header className="page-header">

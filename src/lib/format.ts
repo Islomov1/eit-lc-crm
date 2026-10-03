@@ -49,3 +49,6 @@ export const textField = (f: FormData, name: string, max = 255) =>
   String(f.get(name) || "")
     .trim()
     .slice(0, max);
+
+// Prisma stores UTC values in PostgreSQL timestamp-without-time-zone columns.
+export const sqlTimestamp = (date: Date) => date.toISOString().slice(0, -1);

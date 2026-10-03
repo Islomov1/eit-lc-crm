@@ -20,6 +20,10 @@ All staff must log in again. Passwords are unchanged. Student, parent, report, p
 
 Prefer a forward fix using the migrated schema. Do not simply promote pre-upgrade code: it expects the old payment/report uniqueness constraints. A full database rollback requires pausing writes, retaining a fresh copy of all post-release data, restoring the verified backup into a separate database, validating it, and coordinating the database endpoint with the matching old deployment. Restoring a pre-release backup directly over live data can lose subsequent work.
 
+## Runtime region
+
+Vercel functions run in Frankfurt (`fra1`), beside the database in `eu-central-1`. The build service may still report a US build location; the `regions` configuration controls runtime placement.
+
 ## Integrations
 
 The incoming Instagram/Make flow and outgoing Meta conversion events are separate. `MAKE_WEBHOOK_URL` is optional; the Integrations page reports when it is absent. Events have a stable `eventId` for the downstream receiver to deduplicate. Failed outgoing events are recorded for investigation. Telegram retries claim messages atomically and check the parent's current link. Manual retry controls can send real messages; use only for deliberate operational recovery.

@@ -10,7 +10,7 @@ if (
 )
   throw new Error("Tests require an isolated local *_test database");
 const p = new PrismaClient();
-const telegramTestUpdates=[];
+const telegramTestUpdates = [];
 const prefix = "qa-" + crypto.randomUUID();
 const id = (n) => prefix + "-" + n;
 const actor = { id: id("admin"), name: "QA Director" };
@@ -98,9 +98,11 @@ before(async () => {
 after(async () => {
   const lead = await p.lead.findUnique({ where: { id: id("lead") } });
   const ids = [id("student"), ...(lead?.studentId ? [lead.studentId] : [])];
-  await p.telegramUpdate.deleteMany({where:{updateId:{in:telegramTestUpdates}}});
-  await p.analyticsEvent.deleteMany({where:{studentId:{in:ids}}});
-  await p.telegramPendingLink.deleteMany({where:{studentId:{in:ids}}});
+  await p.telegramUpdate.deleteMany({
+    where: { updateId: { in: telegramTestUpdates } },
+  });
+  await p.analyticsEvent.deleteMany({ where: { studentId: { in: ids } } });
+  await p.telegramPendingLink.deleteMany({ where: { studentId: { in: ids } } });
   await p.telegramDelivery.deleteMany({ where: { studentId: { in: ids } } });
   await p.parent.deleteMany({ where: { studentId: { in: ids } } });
   await p.leadActivity.deleteMany({
@@ -194,6 +196,11 @@ test("two course payments remain independent; partial balance and edit conflicts
     all: true,
   });
   assert.equal(result.rows.length, 2);
+  const debt = await load("src/lib/dashboard.ts").debtSummary("2026-10");
+  assert.equal(
+    debt.rows.find((r) => r.studentId === id("student")).balance,
+    450000,
+  );
   assert.equal(
     result.rows.reduce((s, r) => s + r.balance, 0),
     450000,
@@ -346,15 +353,108 @@ test("same-origin login works behind Next hostname normalization, cross-origin r
   );
 });
 
-test('Telegram linking rejects another chat and expired confirmation, accepts the verified chat', async()=>{
- const previousSecret=process.env.TELEGRAM_WEBHOOK_SECRET;process.env.TELEGRAM_WEBHOOK_SECRET='local-test-only';
- const tg=loadTS({'@/lib/prisma':{prisma:p},'@/lib/telegram':{answerTelegramCallbackQuery:async()=>{},removeTelegramReplyKeyboard:async()=>{},sendTelegramContactRequestKeyboard:async()=>{},sendTelegramMessage:async()=>({ok:true}),sendTelegramMessageWithInlineKeyboard:async()=>{}}})('src/app/api/telegram/route.ts');
- const chat=123456789;const sid=id('pending');
- await p.telegramPendingLink.create({data:{sessionId:sid,chatId:BigInt(chat),parentId:id('parent'),studentId:id('student'),expiresAt:new Date(Date.now()+60000)}});
- async function confirm(chatId){const updateId=crypto.randomInt(1000000000,2000000000);telegramTestUpdates.push(updateId);return tg.POST(new Request('http://localhost/api/telegram',{method:'POST',headers:{'Content-Type':'application/json','x-telegram-bot-api-secret-token':'local-test-only'},body:JSON.stringify({update_id:updateId,callback_query:{id:'qa',from:{id:chatId},data:'link_yes:session:'+sid,message:{chat:{id:chatId,type:'private'}}}})}))}
- try{
-  await confirm(chat+1);assert.equal((await p.parent.findUnique({where:{id:id('parent')}})).telegramId,null);
-  await p.telegramPendingLink.updateMany({where:{sessionId:sid},data:{expiresAt:new Date(0)}});await confirm(chat);assert.equal((await p.parent.findUnique({where:{id:id('parent')}})).telegramId,null);
-  await p.telegramPendingLink.updateMany({where:{sessionId:sid},data:{expiresAt:new Date(Date.now()+60000)}});await confirm(chat);assert.equal((await p.parent.findUnique({where:{id:id('parent')}})).telegramId,BigInt(chat));
- }finally{if(previousSecret===undefined)delete process.env.TELEGRAM_WEBHOOK_SECRET;else process.env.TELEGRAM_WEBHOOK_SECRET=previousSecret;}
+test("Telegram linking rejects another chat and expired confirmation, accepts the verified chat", async () => {
+  const previousSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  process.env.TELEGRAM_WEBHOOK_SECRET = "local-test-only";
+  const tg = loadTS({
+    "@/lib/prisma": { prisma: p },
+    "@/lib/telegram": {
+      answerTelegramCallbackQuery: async () => {},
+      removeTelegramReplyKeyboard: async () => {},
+      sendTelegramContactRequestKeyboard: async () => {},
+      sendTelegramMessage: async () => ({ ok: true }),
+      sendTelegramMessageWithInlineKeyboard: async () => {},
+    },
+  })("src/app/api/telegram/route.ts");
+  const chat = 123456789;
+  const sid = id("pending");
+  await p.telegramPendingLink.create({
+    data: {
+      sessionId: sid,
+      chatId: BigInt(chat),
+      parentId: id("parent"),
+      studentId: id("student"),
+      expiresAt: new Date(Date.now() + 60000),
+    },
+  });
+  async function confirm(chatId) {
+    const updateId = crypto.randomInt(1000000000, 2000000000);
+    telegramTestUpdates.push(updateId);
+    return tg.POST(
+      new Request("http://localhost/api/telegram", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-telegram-bot-api-secret-token": "local-test-only",
+        },
+        body: JSON.stringify({
+          update_id: updateId,
+          callback_query: {
+            id: "qa",
+            from: { id: chatId },
+            data: "link_yes:session:" + sid,
+            message: { chat: { id: chatId, type: "private" } },
+          },
+        }),
+      }),
+    );
+  }
+  try {
+    await confirm(chat + 1);
+    assert.equal(
+      (await p.parent.findUnique({ where: { id: id("parent") } })).telegramId,
+      null,
+    );
+    await p.telegramPendingLink.updateMany({
+      where: { sessionId: sid },
+      data: { expiresAt: new Date(0) },
+    });
+    await confirm(chat);
+    assert.equal(
+      (await p.parent.findUnique({ where: { id: id("parent") } })).telegramId,
+      null,
+    );
+    await p.telegramPendingLink.updateMany({
+      where: { sessionId: sid },
+      data: { expiresAt: new Date(Date.now() + 60000) },
+    });
+    await confirm(chat);
+    assert.equal(
+      (await p.parent.findUnique({ where: { id: id("parent") } })).telegramId,
+      BigInt(chat),
+    );
+  } finally {
+    if (previousSecret === undefined)
+      delete process.env.TELEGRAM_WEBHOOK_SECRET;
+    else process.env.TELEGRAM_WEBHOOK_SECRET = previousSecret;
+  }
+});
+
+test("login rate-limit expiration is fifteen minutes regardless of database timezone", async () => {
+  const route = load("src/app/api/login/route.ts");
+  const email = id("unknown") + "@test.local";
+  try {
+    const r = await route.POST(
+      new Request("http://localhost/api/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          host: "localhost",
+          origin: "http://localhost",
+        },
+        body: JSON.stringify({ email, password: "invalid-password" }),
+      }),
+    );
+    assert.equal(r.status, 401);
+    const attempt = await p.loginAttempt.findUniqueOrThrow({
+      where: { key: hashToken(email) },
+    });
+    const remaining = attempt.expiresAt.getTime() - Date.now();
+    assert.ok(
+      remaining > 880000 && remaining <= 900000,
+      "expiration must be fifteen minutes",
+    );
+  } finally {
+    await p.loginAttempt.deleteMany({ where: { key: hashToken(email) } });
+  }
 });
