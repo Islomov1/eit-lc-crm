@@ -1,18 +1,30 @@
+import { apiUser, sameOrigin } from "@/lib/auth";
 // src/app/api/admin/send-attendance-warning/route.ts
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import { sendTelegramToStudentParents } from "@/lib/telegramDelivery";
 
-export async function GET(request: Request) {
+export async function POST(request: Request) {
+  if (!sameOrigin(request) || !(await apiUser(["ADMIN", "DIRECTOR"])))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const { searchParams } = new URL(request.url);
   const month = searchParams.get("month");
 
   const selectedMonth = month ? new Date(month) : new Date();
 
-  const startOfMonth = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth(), 1);
-  const endOfMonth = new Date(selectedMonth.getFullYear(), selectedMonth.getMonth() + 1, 1);
+  const startOfMonth = new Date(
+    selectedMonth.getFullYear(),
+    selectedMonth.getMonth(),
+    1,
+  );
+  const endOfMonth = new Date(
+    selectedMonth.getFullYear(),
+    selectedMonth.getMonth() + 1,
+    1,
+  );
 
   const students = await prisma.student.findMany({
+    where: { archivedAt: null },
     include: {
       parents: true,
       reports: {
@@ -32,7 +44,9 @@ export async function GET(request: Request) {
     const total = student.reports.length;
     if (total === 0) continue;
 
-    const present = student.reports.filter((r) => r.attendance === "PRESENT").length;
+    const present = student.reports.filter(
+      (r) => r.attendance === "PRESENT",
+    ).length;
     const percent = (present / total) * 100;
 
     if (percent < 70) {
@@ -53,11 +67,16 @@ Iltimos, darslarga muntazam qatnashishini nazorat qiling.
 `.trim();
 
       // ✅ centralized delivery + dedupe per student+month
-      await sendTelegramToStudentParents(student.id, message, { type: "SYSTEM" }, {
-        sourceType: "ATTENDANCE_WARNING",
-        sourceId: monthKey,
-        idempotencyKey: `ATTENDANCE_WARNING:${student.id}:${monthKey}`,
-      });
+      await sendTelegramToStudentParents(
+        student.id,
+        message,
+        { type: "SYSTEM" },
+        {
+          sourceType: "ATTENDANCE_WARNING",
+          sourceId: monthKey,
+          idempotencyKey: `ATTENDANCE_WARNING:${student.id}:${monthKey}`,
+        },
+      );
     }
   }
 

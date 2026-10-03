@@ -1,317 +1,74 @@
 "use server";
-
-import { revalidatePath } from "next/cache";
-import { PaymentMethod, PaymentStatus, Role } from "@prisma/client";
+import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-
-/* ── helpers ─────────────────────────────────────────────── */
-
-function monthWindowFromYYYYMM(yyyyMm: string) {
-  const [y, m] = yyyyMm.split("-").map(Number);
-  if (!y || !m) throw new Error("Invalid month format. Use YYYY-MM");
-  const start = new Date(y, m - 1, 1, 0, 0, 0, 0);
-  const end = new Date(y, m, 1, 0, 0, 0, 0);
-  return { start, end };
-}
-
-function parsePaymentMethod(value: unknown): PaymentMethod {
-  const v = String(value || "").toUpperCase();
-  if (v in PaymentMethod) return PaymentMethod[v as keyof typeof PaymentMethod];
-  return PaymentMethod.CASH;
-}
-
-function parsePaymentStatus(value: unknown): PaymentStatus {
-  const v = String(value || "").toUpperCase();
-  if (v in PaymentStatus) return PaymentStatus[v as keyof typeof PaymentStatus];
-  return PaymentStatus.PAID;
-}
-
-function toInt(v: unknown) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.trunc(n));
-}
-
-function clamp(v: number, min: number, max: number) {
-  return Math.min(Math.max(v, min), max);
-}
-
-function calcFinalAmount(base: number, discountPct: number, bonus: number): number {
-  const discounted = Math.round(base * (1 - clamp(discountPct, 0, 100) / 100));
-  return Math.max(0, discounted + bonus);
-}
-
-/* ── queries ─────────────────────────────────────────────── */
-
+import { ledger, savePaymentRecord } from "@/lib/payments";
+import { textField, dateKey, money } from "@/lib/format";
+import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { sendTelegramToStudentParents } from "@/lib/telegramDelivery";
 export async function getTeachers() {
+  await requireRole("ADMIN", "DIRECTOR");
   return prisma.user.findMany({
-    where: { role: Role.TEACHER },
-    orderBy: [{ name: "asc" }],
+    where: { role: "TEACHER", disabledAt: null },
     select: { id: true, name: true },
+    orderBy: { name: "asc" },
   });
 }
-
-export async function getTeacherSheet(params: {
-  teacherId: string;
-  month: string;
-  q?: string;
-}) {
-  const { start, end } = monthWindowFromYYYYMM(params.month);
-
-  const teacher = await prisma.user.findUnique({
-    where: { id: params.teacherId },
-    select: { id: true, name: true },
-  });
-
-  if (!teacher) throw new Error("Teacher not found");
-
-  const q = (params.q || "").trim();
-
-  // ✅ Use groups (many-to-many) instead of group
-  const students = await prisma.student.findMany({
-    where: {
-      groups: { some: { teacherId: params.teacherId } },
-      ...(q ? { name: { contains: q, mode: "insensitive" } } : {}),
+export async function saveStudentPayment(f: FormData) {
+  const actor = await requireRole("ADMIN", "DIRECTOR");
+  await savePaymentRecord(
+    {
+      studentId: textField(f, "studentId"),
+      groupId: textField(f, "groupId"),
+      month: textField(f, "month"),
+      baseAmount: Number(f.get("baseAmount")),
+      discountPct: Number(f.get("discountPct")),
+      bonus: Number(f.get("bonus")),
+      received: Number(f.get("received")),
+      method: textField(f, "method"),
+      status: textField(f, "status"),
+      note: textField(f, "note", 2000),
+      version: textField(f, "version"),
     },
-    orderBy: [{ name: "asc" }],
-    select: {
-      id: true,
-      name: true,
-      // ✅ Return all groups for this teacher
-      groups: {
-        where: { teacherId: params.teacherId },
-        select: { id: true, name: true, teacherId: true },
-      },
-    },
-  });
-
-  const payments = await prisma.payment.findMany({
-    where: {
-      teacherId: params.teacherId,
-      periodStart: start,
-    },
-    select: {
-      id: true,
-      studentId: true,
-      groupId: true,
-      amount: true,
-      baseAmount: true,
-      discountPct: true,
-      bonus: true,
-      status: true,
-      method: true,
-      paidAt: true,
-      note: true,
-    },
-  });
-
-  const payMap = new Map(payments.map((p) => [p.studentId, p]));
-
-  const rows = students.map((s) => {
-    const p = payMap.get(s.id);
-    const isPaid =
-      !!p && (p.status === PaymentStatus.PAID || p.status === PaymentStatus.PARTIAL);
-
-    // Pick the first group that belongs to this teacher
-    const teacherGroup = s.groups[0] ?? null;
-
-    return {
-      studentId: s.id,
-      studentName: s.name,
-      groupName: teacherGroup?.name ?? "—",
-      groupId: teacherGroup?.id ?? null,
-      paid: isPaid,
-      paymentId: p?.id ?? null,
-      baseAmount: p?.baseAmount ?? 0,
-      discountPct: p?.discountPct ?? 0,
-      bonus: p?.bonus ?? 0,
-      amount: p?.amount ?? 0,
-      status: p?.status ?? PaymentStatus.PAID,
-      method: p?.method ?? PaymentMethod.CASH,
-      paidAt: p?.paidAt ?? null,
-      note: p?.note ?? "",
-    };
-  });
-
-  return { teacher, monthStart: start, monthEnd: end, rows };
-}
-
-/* ── mutations ───────────────────────────────────────────── */
-
-export async function saveStudentPayment(formData: FormData) {
-  const teacherId = String(formData.get("teacherId") || "");
-  const studentId = String(formData.get("studentId") || "");
-  const month = String(formData.get("month") || "");
-  const method = parsePaymentMethod(formData.get("method"));
-  const status = parsePaymentStatus(formData.get("status"));
-  const note = String(formData.get("note") || "");
-
-  const baseAmount = toInt(formData.get("baseAmount"));
-  const discountPct = clamp(toInt(formData.get("discountPct")), 0, 100);
-  const bonus = toInt(formData.get("bonus"));
-  const amount = calcFinalAmount(baseAmount, discountPct, bonus);
-
-  if (!teacherId) throw new Error("teacherId is required");
-  if (!studentId) throw new Error("studentId is required");
-  if (!month) throw new Error("month is required");
-
-  const { start, end } = monthWindowFromYYYYMM(month);
-
-  // ✅ Use groups (many-to-many)
-  const student = await prisma.student.findUnique({
-    where: { id: studentId },
-    include: {
-      groups: {
-        where: { teacherId },
-        select: { id: true, teacherId: true },
-      },
-    },
-  });
-
-  if (!student) throw new Error("Student not found");
-
-  // Pick the first group belonging to this teacher
-  const teacherGroup = student.groups[0] ?? null;
-  const groupId = teacherGroup?.id ?? null;
-
-  if (!teacherGroup) {
-    throw new Error("This student is not assigned to this teacher");
-  }
-
-  await prisma.payment.upsert({
-    where: {
-      studentId_periodStart: { studentId, periodStart: start },
-    },
-    create: {
-      studentId,
-      teacherId,
-      groupId,
-      periodStart: start,
-      periodEnd: end,
-      baseAmount,
-      discountPct,
-      bonus,
-      amount,
-      method,
-      status,
-      note: note || null,
-      paidAt: new Date(),
-      classesIncluded: 12,
-    },
-    update: {
-      baseAmount,
-      discountPct,
-      bonus,
-      amount,
-      method,
-      status,
-      note: note || null,
-      paidAt: new Date(),
-      groupId,
-      teacherId,
-    },
-  });
-
-  revalidatePath("/admin/payments");
-}
-
-export async function deletePayment(formData: FormData) {
-  const id = formData.get("id")?.toString();
-  if (!id) return;
-  await prisma.payment.delete({ where: { id } });
-  revalidatePath("/admin/payments");
-}
-
-export async function sendPaymentReminders(formData: FormData) {
-  const month = String(formData.get("month") || "");
-  if (!month) throw new Error("month is required");
-
-  const { start } = monthWindowFromYYYYMM(month);
-
-  // ✅ Use groups (many-to-many) — students in at least one group
-  const allStudents = await prisma.student.findMany({
-    where: { groups: { some: {} } },
-    select: {
-      id: true,
-      name: true,
-      groups: { select: { name: true }, take: 1 },
-      parents: { select: { id: true, telegramId: true, name: true } },
-    },
-  });
-
-  const paidStudentIds = await prisma.payment.findMany({
-    where: { periodStart: start, status: { in: ["PAID", "PARTIAL"] } },
-    select: { studentId: true },
-  });
-  const paidSet = new Set(paidStudentIds.map((p) => p.studentId));
-
-  const unpaid = allStudents.filter(
-    (s) => !paidSet.has(s.id) && s.parents.some((p) => p.telegramId !== null)
+    actor,
   );
-
-  if (unpaid.length === 0) return;
-
-  const monthLabel = new Date(start).toLocaleString("ru-RU", { month: "long", year: "numeric" });
-  const monthLabelUz = new Date(start).toLocaleString("uz-UZ", { month: "long", year: "numeric" });
-
-  const { sendTelegramToStudentParents } = await import("@/lib/telegramDelivery");
-
-  let sent = 0;
-  let skipped = 0;
-
-  for (const student of unpaid) {
-    const linkedParents = student.parents.filter((p) => p.telegramId !== null);
-    if (linkedParents.length === 0) { skipped++; continue; }
-
-    const groupName = student.groups[0]?.name ?? "—";
-
-    const message = `
-💳 НАПОМИНАНИЕ ОБ ОПЛАТЕ
-EIT LC
-
-Уважаемый родитель!
-
-Оплата за обучение за ${monthLabel} для вашего ребёнка:
-👤 ${student.name}
-📚 Группа: ${groupName}
-
-ещё не поступила. Просим оплатить в ближайшее время.
-
-По вопросам: +998 77 114 11 33
-
-—————————————
-
-💳 TO'LOV ESLATMASI
-EIT LC
-
-Hurmatli ota-ona!
-
-${monthLabelUz} oyi uchun o'qish to'lovi:
-👤 ${student.name}
-📚 Guruh: ${groupName}
-
-hali amalga oshirilmagan. Iltimos, yaqin orada to'lovni amalga oshiring.
-
-Savollar uchun: +998 77 114 11 33
-    `.trim();
-
-    try {
+  revalidatePath("/admin/payments");
+  revalidatePath("/admin");
+  revalidatePath("/admin/students/" + textField(f, "studentId"));
+}
+export async function sendPaymentReminders(f: FormData) {
+  const user = await requireRole("ADMIN", "DIRECTOR");
+  if (f.get("confirm") !== "yes")
+    throw new Error("Подтвердите отправку родителям");
+  const data = await ledger({
+    month: textField(f, "month"),
+    teacherId: textField(f, "teacherId"),
+    all: true,
+  });
+  const due = data.rows.filter((r) => r.balance > 0);
+  // Each button press is audited; a repeated press on the same day is deduplicated.
+  await prisma.auditLog.create({
+    data: {
+      actorId: user.id,
+      actorName: user.name,
+      action: "REMINDERS",
+      entity: "Payment",
+      entityId: data.month,
+      summary: `Запрошены напоминания: ${due.length} начислений`,
+    },
+  });
+  after(async () => {
+    for (const r of due)
       await sendTelegramToStudentParents(
-        student.id,
-        message,
-        { type: "SYSTEM" },
+        r.studentId,
+        `EIT · Напоминание об оплате\nУченик: ${r.studentName}\nГруппа: ${r.groupName}\nПериод: ${data.month}\nОстаток: ${money(r.balance)}\nПо вопросам: +998 77 114 11 33`,
+        { type: "USER", id: user.id },
         {
           sourceType: "PAYMENT_REMINDER",
-          sourceId: `${student.id}:${month}`,
-          idempotencyKey: `reminder:${student.id}:${month}:${Date.now()}`,
-        }
+          sourceId: r.key + ":" + data.month,
+          idempotencyKey: `payment:${r.key}:${data.month}:${dateKey()}`,
+        },
       );
-      sent++;
-    } catch {
-      skipped++;
-    }
-  }
-
-  console.log(`Reminders: ${sent} sent, ${skipped} skipped`);
-  revalidatePath("/admin/payments");
+  });
+  revalidatePath("/admin/telegram-status");
 }

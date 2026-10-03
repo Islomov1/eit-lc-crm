@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EIT OS · CRM
 
-## Getting Started
+Next.js / React / Prisma / PostgreSQL. Brand assets and locally hosted Manrope fonts are copied from the EIT OS landing project.
 
-First, run the development server:
+## Local development
 
-```bash
+Use a separate development database. `.env` and `.env.local` are private and never committed. Existing local environment files may point to production: explicitly override **both** `DATABASE_URL` and `DIRECT_URL` for tests.
+
+```sh
+npm ci
+npx prisma migrate deploy
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Required: `DATABASE_URL`, `DIRECT_URL`. Integrations: `WEBHOOK_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME`. Optional `MAKE_WEBHOOK_URL` sends lead lifecycle events to a separate Make receiver; it must not point to the incoming CRM leads endpoint. `CRON_SECRET` is required to enable automated Telegram retries. No retry schedule is enabled by default.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Validation
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```sh
+DATABASE_URL=postgresql://localhost/eit_crm_upgrade_test DIRECT_URL=postgresql://localhost/eit_crm_upgrade_test TELEGRAM_BOT_TOKEN='' MAKE_WEBHOOK_URL='' npm test
+npm run lint
+npm run build
+```
 
-## Learn More
+Integration tests refuse non-local databases or names without `_test`. They create and remove their own synthetic rows and mock Telegram delivery. Restore a backup into an empty test database and apply migrations before running them. Never test outgoing notifications against real parent chats.
 
-To learn more about Next.js, take a look at the following resources:
+## Access and data
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Director: all sections, finance analytics, expenses, staff and audit.
+- Administrator: daily operations, students, groups, leads, attendance, payments and integrations.
+- Teacher: own groups, students, attendance and reports.
+- Support: additional learning sessions.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Sessions are random tokens stored as hashes in PostgreSQL. Old `userId`/`userRole` cookies grant no access. Changing a role/password or disabling an account revokes its sessions. Login rate limits are shared across instances.
 
-## Deploy on Vercel
+Attendance is unique per student **and group** per day. Payments are unique per student **and group** per billing month. The received amount field is a cumulative total, not an extra installment. Financial analytics is by billing period, not a cash-flow report by receipt date. Archives preserve history. Group membership changes and payment corrections are audited.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Incoming Instagram leads use `/api/leads/webhook`, authenticated with `Authorization: Bearer <WEBHOOK_SECRET>`. Meta lead IDs are unique and retries are safe. `dryRun: true` validates without saving. Directors can edit form-to-course mappings in Integrations.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Operations
+
+See [deployment and recovery](docs/operations.md). Do not run seeds against production. Never commit secrets, private database dumps, or exported student data.

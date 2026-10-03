@@ -1,34 +1,34 @@
 "use client";
-
-import { useRouter } from "next/navigation";
-import { useTransition } from "react";
-
+import { useState } from "react";
 export default function LogoutButton() {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
-
-  const onLogout = async () => {
-    try {
-      await fetch("/api/logout", {
-        method: "POST",
-        cache: "no-store",
-      });
-    } finally {
-      startTransition(() => {
-        router.replace("/login");
-        router.refresh();
-      });
-    }
-  };
-
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState(false);
   return (
     <button
       type="button"
-      onClick={onLogout}
       disabled={pending}
-      className="px-4 py-2 rounded-lg bg-black text-white hover:opacity-85 disabled:opacity-60"
+      className="px-4 py-2 rounded-lg"
+      onClick={async () => {
+        setPending(true);
+        setError(false);
+        try {
+          const r = await fetch("/api/logout", {
+            method: "POST",
+            cache: "no-store",
+          });
+          if (!r.ok) throw new Error();
+          window.location.assign("/login");
+        } catch {
+          setPending(false);
+          setError(true);
+        }
+      }}
     >
-      {pending ? "Logging out..." : "Log out"}
+      {pending
+        ? "Выходим…"
+        : error
+          ? "Ошибка. Повторить выход"
+          : "Выйти из аккаунта"}
     </button>
   );
 }

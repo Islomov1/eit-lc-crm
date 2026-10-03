@@ -1,25 +1,26 @@
+import { apiUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 
 export async function GET(request: Request) {
+  if (!(await apiUser(["ADMIN", "DIRECTOR"])))
+    return new Response("Forbidden", { status: 403 });
   const { searchParams } = new URL(request.url);
   const month = searchParams.get("month");
 
-  const selectedMonth = month
-    ? new Date(month)
-    : new Date();
+  const selectedMonth = month ? new Date(month) : new Date();
 
   const startOfMonth = new Date(
     selectedMonth.getFullYear(),
     selectedMonth.getMonth(),
-    1
+    1,
   );
 
   const endOfMonth = new Date(
     selectedMonth.getFullYear(),
     selectedMonth.getMonth() + 1,
-    1
+    1,
   );
 
   const supports = await prisma.user.findMany({
@@ -37,15 +38,13 @@ export async function GET(request: Request) {
   });
 
   const data = supports.map((support) => {
-    const totalHours =
-      support.supportSessions.reduce(
-        (sum, session) =>
-          sum +
-          (session.endTime.getTime() -
-            session.startTime.getTime()) /
-            (1000 * 60 * 60),
-        0
-      );
+    const totalHours = support.supportSessions.reduce(
+      (sum, session) =>
+        sum +
+        (session.endTime.getTime() - session.startTime.getTime()) /
+          (1000 * 60 * 60),
+      0,
+    );
 
     return {
       Name: support.name,
@@ -67,8 +66,7 @@ export async function GET(request: Request) {
 
   return new NextResponse(buffer, {
     headers: {
-      "Content-Disposition":
-        "attachment; filename=support-report.xlsx",
+      "Content-Disposition": "attachment; filename=support-report.xlsx",
       "Content-Type":
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     },

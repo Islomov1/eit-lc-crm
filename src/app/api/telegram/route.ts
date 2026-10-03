@@ -60,7 +60,9 @@ export async function POST(req: Request) {
 
   try {
     const safeJson = JSON.parse(JSON.stringify(body)) as Prisma.InputJsonValue;
-    await prisma.telegramUpdate.create({ data: { updateId, payload: safeJson } });
+    await prisma.telegramUpdate.create({
+      data: { updateId, payload: safeJson },
+    });
   } catch (err: unknown) {
     const code = isObject(err) ? (err as { code?: string }).code : undefined;
     if (code === "P2002") return NextResponse.json({ ok: true });
@@ -72,16 +74,39 @@ export async function POST(req: Request) {
     // ── CALLBACK QUERY ────────────────────────────────────
     const callbackRaw = body["callback_query"];
     if (isObject(callbackRaw)) {
-      const callbackId = typeof callbackRaw["id"] === "string" ? callbackRaw["id"] : null;
-      const callbackData = typeof callbackRaw["data"] === "string" ? callbackRaw["data"] : null;
+      const callbackId =
+        typeof callbackRaw["id"] === "string" ? callbackRaw["id"] : null;
+      const callbackData =
+        typeof callbackRaw["data"] === "string" ? callbackRaw["data"] : null;
       const callbackMessage = callbackRaw["message"];
-      const chatRaw = isObject(callbackMessage) && isObject(callbackMessage["chat"]) ? callbackMessage["chat"] : null;
+      const chatRaw =
+        isObject(callbackMessage) && isObject(callbackMessage["chat"])
+          ? callbackMessage["chat"]
+          : null;
 
-      if (!callbackId || !callbackData || !chatRaw || typeof chatRaw["id"] !== "number") {
-        await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "IGNORED", processedAt: new Date(), error: "Bad callback_query" } });
+      if (
+        !callbackId ||
+        !callbackData ||
+        !chatRaw ||
+        typeof chatRaw["id"] !== "number"
+      ) {
+        await prisma.telegramUpdate.update({
+          where: { updateId },
+          data: {
+            status: "IGNORED",
+            processedAt: new Date(),
+            error: "Bad callback_query",
+          },
+        });
         return NextResponse.json({ ok: true });
       }
 
+      if (
+        chatRaw["type"] !== "private" ||
+        !isObject(callbackRaw["from"]) ||
+        callbackRaw["from"]["id"] !== chatRaw["id"]
+      )
+        return NextResponse.json({ ok: true });
       const chatId = BigInt(chatRaw["id"]);
 
       // link_yes:session:<sessionId>
@@ -90,97 +115,234 @@ export async function POST(req: Request) {
 
         // ✅ groups instead of group
         const pendingLinks = await prisma.telegramPendingLink.findMany({
-          where: { sessionId, status: "PENDING" },
+          where: {
+            sessionId,
+            chatId,
+            status: "PENDING",
+            expiresAt: { gt: new Date() },
+            student: { archivedAt: null },
+          },
           include: { parent: true, student: { include: { groups: true } } },
         });
 
         if (pendingLinks.length === 0) {
-          await answerTelegramCallbackQuery(callbackId, "Запись не найдена / Yozuv topilmadi");
-          await sendTelegramMessage(chatId.toString(), `❌ Запрос не найден или устарел.\n\n❌ So'rov topilmadi yoki eskirgan.`);
-          await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "IGNORED", processedAt: new Date(), error: "Session not found" } });
+          await answerTelegramCallbackQuery(
+            callbackId,
+            "Запись не найдена / Yozuv topilmadi",
+          );
+          await sendTelegramMessage(
+            chatId.toString(),
+            `❌ Запрос не найден или устарел.\n\n❌ So'rov topilmadi yoki eskirgan.`,
+          );
+          await prisma.telegramUpdate.update({
+            where: { updateId },
+            data: {
+              status: "IGNORED",
+              processedAt: new Date(),
+              error: "Session not found",
+            },
+          });
           return NextResponse.json({ ok: true });
         }
 
-        await Promise.all(pendingLinks.map((link) => prisma.parent.update({ where: { id: link.parentId }, data: { telegramId: chatId } })));
-        await prisma.telegramPendingLink.updateMany({ where: { sessionId }, data: { status: "CONFIRMED" } });
-        await Promise.all(pendingLinks.map((link) =>
-          prisma.analyticsEvent.create({
-            data: {
-              name: "parent_linked",
-              actorType: "PARENT",
-              actorId: link.parentId,
-              studentId: link.studentId,
-              groupId: link.student.groups[0]?.id ?? undefined, // ✅
-              props: { method: "contact_confirm", sessionId },
-            },
-          })
-        ));
+        await Promise.all(
+          pendingLinks.map((link) =>
+            prisma.parent.update({
+              where: { id: link.parentId },
+              data: { telegramId: chatId },
+            }),
+          ),
+        );
+        await prisma.telegramPendingLink.updateMany({
+          where: {
+            sessionId,
+            chatId,
+            status: "PENDING",
+            expiresAt: { gt: new Date() },
+          },
+          data: { status: "CONFIRMED" },
+        });
+        await Promise.all(
+          pendingLinks.map((link) =>
+            prisma.analyticsEvent.create({
+              data: {
+                name: "parent_linked",
+                actorType: "PARENT",
+                actorId: link.parentId,
+                studentId: link.studentId,
+                groupId: link.student.groups[0]?.id ?? undefined, // ✅
+                props: { method: "contact_confirm", sessionId },
+              },
+            }),
+          ),
+        );
 
         await answerTelegramCallbackQuery(callbackId, "Подключено / Ulandi");
 
         // ✅ groups[0]?.name
-        const childrenList = pendingLinks.map((l, i) =>
-          `${i + 1}. 👧/👦 ${l.student.name} — ${l.student.groups[0]?.name ?? "—"}`
-        ).join("\n");
+        const childrenList = pendingLinks
+          .map(
+            (l, i) =>
+              `${i + 1}. 👧/👦 ${l.student.name} — ${l.student.groups[0]?.name ?? "—"}`,
+          )
+          .join("\n");
 
         await removeTelegramReplyKeyboard(
           chatId.toString(),
-          `✅ Подключение подтверждено!\n\nВаши дети:\n${childrenList}\n\nТеперь вы будете получать отчёты от EIT LC.\n\n✅ Ulanish tasdiqlandi!\n\nSizning farzandlaringiz:\n${childrenList}\n\nEndi siz EIT LC dan xabarlarni olasiz.`
+          `✅ Подключение подтверждено!\n\nВаши дети:\n${childrenList}\n\nТеперь вы будете получать отчёты от EIT LC.\n\n✅ Ulanish tasdiqlandi!\n\nSizning farzandlaringiz:\n${childrenList}\n\nEndi siz EIT LC dan xabarlarni olasiz.`,
         );
 
-        await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "PROCESSED", processedAt: new Date() } });
+        await prisma.telegramUpdate.update({
+          where: { updateId },
+          data: { status: "PROCESSED", processedAt: new Date() },
+        });
         return NextResponse.json({ ok: true });
       }
 
       // link_no:session:<sessionId>
       if (callbackData.startsWith("link_no:session:")) {
         const sessionId = callbackData.slice("link_no:session:".length).trim();
-        await prisma.telegramPendingLink.updateMany({ where: { sessionId, status: "PENDING" }, data: { status: "REJECTED" } });
-        await answerTelegramCallbackQuery(callbackId, "Принято / Qabul qilindi");
-        await sendTelegramMessage(chatId.toString(), `❌ Подключение отменено. Обратитесь к администратору EIT.\n\n❌ Ulanish bekor qilindi. EIT administratoriga murojaat qiling.`);
-        await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "PROCESSED", processedAt: new Date() } });
+        await prisma.telegramPendingLink.updateMany({
+          where: {
+            sessionId,
+            chatId,
+            status: "PENDING",
+            expiresAt: { gt: new Date() },
+            student: { archivedAt: null },
+          },
+          data: { status: "REJECTED" },
+        });
+        await answerTelegramCallbackQuery(
+          callbackId,
+          "Принято / Qabul qilindi",
+        );
+        await sendTelegramMessage(
+          chatId.toString(),
+          `❌ Подключение отменено. Обратитесь к администратору EIT.\n\n❌ Ulanish bekor qilindi. EIT administratoriga murojaat qiling.`,
+        );
+        await prisma.telegramUpdate.update({
+          where: { updateId },
+          data: { status: "PROCESSED", processedAt: new Date() },
+        });
         return NextResponse.json({ ok: true });
       }
 
-      await answerTelegramCallbackQuery(callbackId, "Неизвестная команда / Noma'lum buyruq");
-      await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "IGNORED", processedAt: new Date(), error: "Unknown callback_data" } });
+      await answerTelegramCallbackQuery(
+        callbackId,
+        "Неизвестная команда / Noma'lum buyruq",
+      );
+      await prisma.telegramUpdate.update({
+        where: { updateId },
+        data: {
+          status: "IGNORED",
+          processedAt: new Date(),
+          error: "Unknown callback_data",
+        },
+      });
       return NextResponse.json({ ok: true });
     }
 
     // ── MESSAGE FLOW ──────────────────────────────────────
     const messageRaw = body["message"];
     if (!isObject(messageRaw)) {
-      await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "IGNORED", processedAt: new Date(), error: "No message object" } });
+      await prisma.telegramUpdate.update({
+        where: { updateId },
+        data: {
+          status: "IGNORED",
+          processedAt: new Date(),
+          error: "No message object",
+        },
+      });
       return NextResponse.json({ ok: true });
     }
 
     const chatRaw = messageRaw["chat"];
     if (!isObject(chatRaw) || typeof chatRaw["id"] !== "number") {
-      await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "IGNORED", processedAt: new Date(), error: "No chat.id" } });
+      await prisma.telegramUpdate.update({
+        where: { updateId },
+        data: {
+          status: "IGNORED",
+          processedAt: new Date(),
+          error: "No chat.id",
+        },
+      });
       return NextResponse.json({ ok: true });
     }
 
+    if (chatRaw["type"] !== "private") return NextResponse.json({ ok: true });
     const chatId = BigInt(chatRaw["id"]);
     const fromRaw = messageRaw["from"];
-    const fromId = isObject(fromRaw) && typeof fromRaw["id"] === "number" ? fromRaw["id"] : null;
-    const text = typeof messageRaw["text"] === "string" ? messageRaw["text"] : "";
+    const fromId =
+      isObject(fromRaw) && typeof fromRaw["id"] === "number"
+        ? fromRaw["id"]
+        : null;
+    const text =
+      typeof messageRaw["text"] === "string" ? messageRaw["text"] : "";
 
     // /start
     if (text.startsWith("/start")) {
-      await sendTelegramContactRequestKeyboard(chatId.toString(), `Здравствуйте! Отправьте свой номер телефона кнопкой ниже.\n\nAssalomu alaykum! Quyidagi tugma orqali telefon raqamingizni yuboring.`);
-      await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "PROCESSED", processedAt: new Date() } });
+      const code = text.trim().split(/\s+/)[1];
+      if (code?.startsWith("eit")) {
+        const invite = await prisma.parentInvite.findFirst({
+          where: {
+            code,
+            status: "ACTIVE",
+            expiresAt: { gt: new Date() },
+            student: { archivedAt: null },
+          },
+        });
+        if (!invite) {
+          await sendTelegramMessage(
+            chatId.toString(),
+            "Приглашение недоступно или истекло. Обратитесь к администратору EIT.",
+          );
+          await prisma.telegramUpdate.update({
+            where: { updateId },
+            data: {
+              status: "IGNORED",
+              processedAt: new Date(),
+              error: "Invalid invite",
+            },
+          });
+          return NextResponse.json({ ok: true });
+        }
+      }
+      await sendTelegramContactRequestKeyboard(
+        chatId.toString(),
+        `Здравствуйте! Отправьте свой номер телефона кнопкой ниже.\n\nAssalomu alaykum! Quyidagi tugma orqali telefon raqamingizni yuboring.`,
+      );
+      await prisma.telegramUpdate.update({
+        where: { updateId },
+        data: { status: "PROCESSED", processedAt: new Date() },
+      });
       return NextResponse.json({ ok: true });
     }
 
     // Contact
     const contactRaw = messageRaw["contact"];
-    if (isObject(contactRaw) && typeof contactRaw["phone_number"] === "string") {
+    if (
+      isObject(contactRaw) &&
+      typeof contactRaw["phone_number"] === "string"
+    ) {
       const contactPhone = normalizePhone(contactRaw["phone_number"]);
-      const contactUserId = typeof contactRaw["user_id"] === "number" ? contactRaw["user_id"] : null;
+      const contactUserId =
+        typeof contactRaw["user_id"] === "number"
+          ? contactRaw["user_id"]
+          : null;
 
       if (!fromId || !contactUserId || contactUserId !== fromId) {
-        await sendTelegramMessage(chatId.toString(), `❌ Пожалуйста, отправьте свой собственный номер.\n\n❌ Iltimos, o'zingizning raqamingizni yuboring.`);
-        await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "IGNORED", processedAt: new Date(), error: "Contact user mismatch" } });
+        await sendTelegramMessage(
+          chatId.toString(),
+          `❌ Пожалуйста, отправьте свой собственный номер.\n\n❌ Iltimos, o'zingizning raqamingizni yuboring.`,
+        );
+        await prisma.telegramUpdate.update({
+          where: { updateId },
+          data: {
+            status: "IGNORED",
+            processedAt: new Date(),
+            error: "Contact user mismatch",
+          },
+        });
         return NextResponse.json({ ok: true });
       }
 
@@ -188,39 +350,68 @@ export async function POST(req: Request) {
 
       // ✅ groups instead of group
       const parents = await prisma.parent.findMany({
-        where: { OR: phoneVariants.map((p) => ({ phone: p })) },
+        where: {
+          student: { archivedAt: null },
+          OR: phoneVariants.map((p) => ({ phone: p })),
+        },
         include: { student: { include: { groups: true } } },
       });
 
       if (parents.length === 0) {
-        await sendTelegramMessage(chatId.toString(), `❌ Номер не найден в системе EIT. Обратитесь к администратору.\n\n❌ Raqam EIT tizimida topilmadi. Administratorga murojaat qiling.`);
-        await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "IGNORED", processedAt: new Date(), error: "Phone not found" } });
+        await sendTelegramMessage(
+          chatId.toString(),
+          `❌ Номер не найден в системе EIT. Обратитесь к администратору.\n\n❌ Raqam EIT tizimida topilmadi. Administratorga murojaat qiling.`,
+        );
+        await prisma.telegramUpdate.update({
+          where: { updateId },
+          data: {
+            status: "IGNORED",
+            processedAt: new Date(),
+            error: "Phone not found",
+          },
+        });
         return NextResponse.json({ ok: true });
       }
 
       const sessionId = randomUUID();
       const expiresAt = new Date(Date.now() + 1000 * 60 * 15);
 
-      await prisma.telegramPendingLink.updateMany({ where: { chatId, status: "PENDING" }, data: { status: "REJECTED" } });
+      await prisma.telegramPendingLink.updateMany({
+        where: { chatId, status: "PENDING" },
+        data: { status: "REJECTED" },
+      });
 
       await Promise.all(
         parents.map((parent) =>
           prisma.telegramPendingLink.create({
-            data: { sessionId, chatId, parentId: parent.id, studentId: parent.studentId, status: "PENDING", expiresAt },
-          })
-        )
+            data: {
+              sessionId,
+              chatId,
+              parentId: parent.id,
+              studentId: parent.studentId,
+              status: "PENDING",
+              expiresAt,
+            },
+          }),
+        ),
       );
 
       const isSingle = parents.length === 1;
 
       // ✅ groups[0]?.name
-      const childrenListRu = parents.map((p, i) =>
-        `${i + 1}. 👧/👦 ${p.student.name}\n    Группа: ${p.student.groups[0]?.name ?? "не назначена"}`
-      ).join("\n");
+      const childrenListRu = parents
+        .map(
+          (p, i) =>
+            `${i + 1}. 👧/👦 ${p.student.name}\n    Группа: ${p.student.groups[0]?.name ?? "не назначена"}`,
+        )
+        .join("\n");
 
-      const childrenListUz = parents.map((p, i) =>
-        `${i + 1}. 👧/👦 ${p.student.name}\n    Guruh: ${p.student.groups[0]?.name ?? "belgilanmagan"}`
-      ).join("\n");
+      const childrenListUz = parents
+        .map(
+          (p, i) =>
+            `${i + 1}. 👧/👦 ${p.student.name}\n    Guruh: ${p.student.groups[0]?.name ?? "belgilanmagan"}`,
+        )
+        .join("\n");
 
       const msgRu = isSingle
         ? `Подтвердите данные:\n\nЭто ваш ребёнок?\n${childrenListRu}\n\nНажмите «Да», если всё верно.`
@@ -230,19 +421,37 @@ export async function POST(req: Request) {
         ? `Ma'lumotlarni tasdiqlang:\n\nBu sizning farzandingizmi?\n${childrenListUz}\n\n«Ha» tugmasini bosing.`
         : `Ma'lumotlarni tasdiqlang:\n\nBular sizning farzandlaringizmi?\n${childrenListUz}\n\nBarcha hisoblarni ulash uchun «Ha» tugmasini bosing.`;
 
-      await sendTelegramMessageWithInlineKeyboard(chatId.toString(), `${msgRu}\n\n${msgUz}`, buildConfirmButtons(sessionId));
-      await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "PROCESSED", processedAt: new Date() } });
+      await sendTelegramMessageWithInlineKeyboard(
+        chatId.toString(),
+        `${msgRu}\n\n${msgUz}`,
+        buildConfirmButtons(sessionId),
+      );
+      await prisma.telegramUpdate.update({
+        where: { updateId },
+        data: { status: "PROCESSED", processedAt: new Date() },
+      });
       return NextResponse.json({ ok: true });
     }
 
-    await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "IGNORED", processedAt: new Date() } });
+    await prisma.telegramUpdate.update({
+      where: { updateId },
+      data: { status: "IGNORED", processedAt: new Date() },
+    });
     return NextResponse.json({ ok: true });
-
   } catch (err) {
     console.error("TG_ROUTE_ERROR:", err);
     try {
-      await prisma.telegramUpdate.update({ where: { updateId }, data: { status: "IGNORED", processedAt: new Date(), error: "Unhandled route error" } });
-    } catch { /* ignore */ }
+      await prisma.telegramUpdate.update({
+        where: { updateId },
+        data: {
+          status: "IGNORED",
+          processedAt: new Date(),
+          error: "Unhandled route error",
+        },
+      });
+    } catch {
+      /* ignore */
+    }
     return NextResponse.json({ ok: true });
   }
 }

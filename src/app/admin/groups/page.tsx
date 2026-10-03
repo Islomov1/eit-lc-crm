@@ -1,368 +1,318 @@
+import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { revalidatePath } from "next/cache";
 import { Prisma, GroupStatus } from "@prisma/client";
+import { revalidatePath } from "next/cache";
+import { textField, pageNumber, money } from "@/lib/format";
+import { ActionForm } from "@/components/ActionForm";
+import Pagination from "@/components/Pagination";
 import Link from "next/link";
-
-export const revalidate = 30;
-
-/* ================= SERVER ACTIONS ================= */
-
-async function createGroup(formData: FormData) {
+const statusLabels: Record<string, string> = {
+  NEW: "Новая",
+  ACTIVE: "Активная",
+  FINISHING: "Завершается",
+  EXPIRED: "Завершена",
+};
+async function saveGroup(f: FormData) {
   "use server";
-  const name = formData.get("name")?.toString().trim();
-  const schedule = formData.get("schedule")?.toString() as "MWF" | "TTS";
-  const startTime = formData.get("startTime")?.toString();
-  const endTime = formData.get("endTime")?.toString();
-  const teacherId = formData.get("teacherId")?.toString() || null;
-  const programId = formData.get("programId")?.toString();
-  if (!name || !schedule || !startTime || !endTime || !programId) return;
-  await prisma.group.create({
-    data: { name, schedule, startTime, endTime, teacherId, month: 1, programId, status: "ACTIVE" },
-  });
-  revalidatePath("/admin/groups");
-}
-
-async function updateGroup(formData: FormData) {
-  "use server";
-  const id = formData.get("id")?.toString();
-  const name = formData.get("name")?.toString().trim();
-  const schedule = formData.get("schedule")?.toString() as "MWF" | "TTS";
-  const startTime = formData.get("startTime")?.toString();
-  const endTime = formData.get("endTime")?.toString();
-  const teacherId = formData.get("teacherId")?.toString();
-  const programId = formData.get("programId")?.toString();
-  const status = formData.get("status")?.toString() as GroupStatus;
-  if (!id || !name || !schedule || !startTime || !endTime) return;
-  await prisma.group.update({
-    where: { id },
-    data: {
+  const actor = await requireRole("ADMIN", "DIRECTOR");
+  const id = textField(f, "id");
+  const name = textField(f, "name");
+  const schedule = textField(f, "schedule");
+  const startTime = textField(f, "startTime");
+  const endTime = textField(f, "endTime");
+  const programId = textField(f, "programId");
+  const teacherId = textField(f, "teacherId") || null;
+  const status = textField(f, "status") || "ACTIVE";
+  const monthlyFee = Number(f.get("monthlyFee"));
+  if (
+    !name ||
+    !["MWF", "TTS"].includes(schedule) ||
+    !/^\d{2}:\d{2}$/.test(startTime) ||
+    !/^\d{2}:\d{2}$/.test(endTime) ||
+    startTime >= endTime ||
+    !Object.values(GroupStatus).includes(status as GroupStatus) ||
+    !Number.isSafeInteger(monthlyFee) ||
+    monthlyFee < 0 ||
+    monthlyFee > 1e9
+  )
+    throw new Error("Проверьте название, время и стоимость");
+  if (
+    teacherId &&
+    !(await prisma.user.findFirst({
+      where: { id: teacherId, role: "TEACHER", disabledAt: null },
+    }))
+  )
+    throw new Error("Преподаватель недоступен");
+  await prisma.$transaction(async (tx) => {
+    const data = {
       name,
-      schedule,
+      schedule: schedule as "MWF" | "TTS",
       startTime,
       endTime,
-      teacherId: teacherId || null,
-      ...(programId ? { programId } : {}),
-      status,
-    },
+      programId,
+      teacherId,
+      status: status as GroupStatus,
+      monthlyFee,
+    };
+    const old = id ? await tx.group.findUniqueOrThrow({ where: { id } }) : null;
+    const g = id
+      ? await tx.group.update({ where: { id }, data })
+      : await tx.group.create({ data });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.id,
+        actorName: actor.name,
+        action: id ? "UPDATE" : "CREATE",
+        entity: "Group",
+        entityId: g.id,
+        summary: `${name}: ${schedule}, ${startTime}–${endTime}; стоимость ${old?.monthlyFee || 0} → ${monthlyFee}`,
+      },
+    });
+  });
+  revalidatePath("/admin/groups");
+  revalidatePath("/admin");
+}
+async function archiveGroup(f: FormData) {
+  "use server";
+  const actor = await requireRole("ADMIN", "DIRECTOR");
+  const id = textField(f, "id");
+  const restore = f.get("restore") === "1";
+  await prisma.$transaction(async (tx) => {
+    const g = await tx.group.update({
+      where: { id },
+      data: { archivedAt: restore ? null : new Date() },
+    });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.id,
+        actorName: actor.name,
+        action: restore ? "RESTORE" : "ARCHIVE",
+        entity: "Group",
+        entityId: id,
+        summary: `${restore ? "Восстановлена" : "Архивирована"} группа ${g.name}`,
+      },
+    });
   });
   revalidatePath("/admin/groups");
 }
-
-async function deleteGroup(formData: FormData) {
-  "use server";
-  const id = formData.get("id")?.toString();
-  if (!id) return;
-  await prisma.report.deleteMany({ where: { groupId: id } });
-  await prisma.group.delete({ where: { id } });
-  revalidatePath("/admin/groups");
-}
-
-/* ================= HELPERS ================= */
-
-function first(v: string | string[] | undefined) {
-  return Array.isArray(v) ? v[0] : (v ?? "");
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  NEW: "bg-blue-100 text-blue-700",
-  ACTIVE: "bg-green-100 text-green-700",
-  FINISHING: "bg-yellow-100 text-yellow-700",
-  EXPIRED: "bg-red-100 text-red-700",
-};
-
-type SP = {
-  programId?: string | string[];
-  q?: string | string[];
-  teacherId?: string | string[];
-  status?: string | string[];
-};
-
-/* ================= PAGE ================= */
-
-export default async function GroupsPage({ searchParams }: { searchParams: Promise<SP> }) {
+export default async function GroupsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  await requireRole("ADMIN", "DIRECTOR");
   const sp = await searchParams;
-
-  const teacherId = first(sp.teacherId).trim();
-  const status = first(sp.status).trim();
-  const selectedProgramId = first(sp.programId).trim();
-  const q = first(sp.q).trim();
-
-  const where: Prisma.GroupWhereInput = {};
-  if (teacherId === "none") where.teacherId = null;
-  else if (teacherId) where.teacherId = teacherId;
-  if (selectedProgramId) where.programId = selectedProgramId;
-  if (status) where.status = status as GroupStatus;
-  if (q) {
-    where.OR = [
-      { name: { contains: q, mode: "insensitive" } },
-      { teacher: { name: { contains: q, mode: "insensitive" } } },
-      { program: { name: { contains: q, mode: "insensitive" } } },
-    ];
-  }
-
-  const [groups, programs, teachers] = await Promise.all([
+  const q = sp.q || "";
+  const page = pageNumber(sp.page);
+  const archived = sp.archived === "1";
+  const where: Prisma.GroupWhereInput = {
+    archivedAt: archived ? { not: null } : null,
+    ...(q ? { name: { contains: q, mode: "insensitive" } } : {}),
+    ...(sp.teacherId ? { teacherId: sp.teacherId } : {}),
+  };
+  const [groups, total, programs, teachers] = await Promise.all([
     prisma.group.findMany({
       where,
-      include: { teacher: true, students: true, program: true },
-      orderBy: { createdAt: "desc" },
-      take: 200,
+      take: 20,
+      skip: (page - 1) * 20,
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      include: {
+        teacher: { select: { name: true } },
+        program: { select: { name: true } },
+        _count: { select: { students: { where: { archivedAt: null } } } },
+      },
     }),
+    prisma.group.count({ where }),
     prisma.program.findMany({ orderBy: { name: "asc" } }),
-    prisma.user.findMany({ where: { role: "TEACHER" }, orderBy: { name: "asc" } }),
+    prisma.user.findMany({
+      where: { role: "TEACHER", disabledAt: null },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
-
-  return (
-    <div className="space-y-8 max-w-5xl">
-      <h1 className="text-2xl font-bold text-gray-900">Groups Management</h1>
-
-      {/* FILTERS */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <h2 className="font-semibold text-gray-900">
-            Filters
-            <span className="ml-2 text-sm font-normal text-gray-400">{groups.length} groups</span>
-          </h2>
-          <div className="flex gap-2 flex-wrap">
-            {q && <Chip label={`Search: ${q}`} />}
-            {status && <Chip label={`Status: ${status}`} />}
-            {teacherId && teacherId !== "none" && <Chip label="Teacher filtered" />}
-          </div>
-        </div>
-
-        <form method="GET" className="flex flex-wrap gap-3">
-          <input
-            name="q"
-            placeholder="Search group / teacher / program"
-            defaultValue={q}
-            className="h-11 px-4 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[220px]"
-          />
-          <select
-            name="programId"
-            defaultValue={selectedProgramId}
-            className="h-11 px-4 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          >
-            <option value="">All programs</option>
+  function fields(g?: (typeof groups)[number]) {
+    return (
+      <>
+        <input type="hidden" name="id" value={g?.id || ""} />
+        <label className="field">
+          <span>Название</span>
+          <input name="name" defaultValue={g?.name || ""} required />
+        </label>
+        <label className="field">
+          <span>Программа</span>
+          <select name="programId" defaultValue={g?.programId || ""} required>
+            <option value="" disabled>
+              Выберите
+            </option>
             {programs.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
             ))}
           </select>
-          <select
-            name="teacherId"
-            defaultValue={teacherId}
-            className="h-11 px-4 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          >
-            <option value="">All teachers</option>
-            <option value="none">No teacher</option>
+        </label>
+        <label className="field">
+          <span>Преподаватель</span>
+          <select name="teacherId" defaultValue={g?.teacherId || ""}>
+            <option value="">Не назначен</option>
             {teachers.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
             ))}
           </select>
-          <select
-            name="status"
-            defaultValue={status}
-            className="h-11 px-4 rounded-xl border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          >
-            <option value="">All status</option>
-            <option value="NEW">NEW</option>
-            <option value="ACTIVE">ACTIVE</option>
-            <option value="FINISHING">FINISHING</option>
-            <option value="EXPIRED">EXPIRED</option>
+        </label>
+        <label className="field">
+          <span>Дни занятий</span>
+          <select name="schedule" defaultValue={g?.schedule || "MWF"}>
+            <option value="MWF">Пн / Ср / Пт</option>
+            <option value="TTS">Вт / Чт / Сб</option>
           </select>
-          <button
-            type="submit"
-            className="h-11 px-6 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 transition"
-          >
-            Apply
-          </button>
-          <Link
-            href="/admin/groups"
-            className="h-11 px-6 flex items-center rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition"
-          >
-            Reset
-          </Link>
-        </form>
-      </div>
-
-      {/* CREATE GROUP */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
-        <h2 className="font-semibold text-gray-900">Create Group</h2>
-        <form action={createGroup} className="grid grid-cols-6 gap-4">
+        </label>
+        <label className="field">
+          <span>Начало</span>
           <input
-            name="name"
-            placeholder="Group name"
-            required
-            className="col-span-2 h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          />
-          <select
-            name="schedule"
-            required
-            className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          >
-            <option value="MWF">Mon-Wed-Fri</option>
-            <option value="TTS">Tue-Thu-Sat</option>
-          </select>
-          <select
-            name="programId"
-            required
-            defaultValue=""
-            className="col-span-2 h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          >
-            <option value="" disabled>Select program</option>
-            {programs.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-          <input
-            type="time"
             name="startTime"
-            required
-            className="h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          />
-          <input
             type="time"
-            name="endTime"
+            defaultValue={g?.startTime || ""}
             required
-            className="h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
           />
-          <select
-            name="teacherId"
-            defaultValue=""
-            className="col-span-2 h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          >
-            <option value="">No teacher</option>
-            {teachers.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
+        </label>
+        <label className="field">
+          <span>Конец</span>
+          <input
+            name="endTime"
+            type="time"
+            defaultValue={g?.endTime || ""}
+            required
+          />
+        </label>
+        <label className="field">
+          <span>Стоимость месяца, сум</span>
+          <input
+            name="monthlyFee"
+            type="number"
+            min={0}
+            max={1000000000}
+            defaultValue={g?.monthlyFee ?? 750000}
+            required
+          />
+        </label>
+        <label className="field">
+          <span>Статус</span>
+          <select name="status" defaultValue={g?.status || "ACTIVE"}>
+            {Object.entries(statusLabels).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
             ))}
           </select>
-          <button className="col-span-6 h-11 bg-gray-900 text-white rounded-xl font-semibold text-sm hover:bg-gray-700 transition">
-            Create Group
-          </button>
-        </form>
-      </div>
-
-      {/* GROUP LIST */}
-      <div className="space-y-4">
-        {groups.length === 0 && (
-          <div className="bg-white rounded-2xl border border-gray-100 p-6 text-sm text-gray-400">
-            No groups found.
-          </div>
-        )}
-
-        {groups.map((group) => (
-          <div key={group.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
-
-            {/* Header */}
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3">
-                <h3 className="font-semibold text-gray-900">{group.name}</h3>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_COLORS[group.status] ?? "bg-gray-100 text-gray-600"}`}>
-                  {group.status}
-                </span>
-              </div>
-              <div className="flex items-center gap-4 text-sm text-gray-500">
-                <span>Program: <span className="font-medium text-gray-700">{group.program?.name ?? "—"}</span></span>
-                <span>{group.students.length} students</span>
-                <form action={deleteGroup}>
-                  <input type="hidden" name="id" value={group.id} />
-                  <button className="px-3 py-1.5 rounded-xl bg-red-100 text-red-600 text-xs font-semibold hover:bg-red-200 transition">
-                    Delete
-                  </button>
-                </form>
-              </div>
-            </div>
-
-            {/* Edit form */}
-            <form action={updateGroup} className="grid grid-cols-6 gap-3">
-              <input type="hidden" name="id" value={group.id} />
-              <input
-                name="name"
-                defaultValue={group.name}
-                className="col-span-2 h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              />
-              <select
-                name="schedule"
-                defaultValue={group.schedule}
-                className="h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              >
-                <option value="MWF">MWF</option>
-                <option value="TTS">TTS</option>
-              </select>
-              <select
-                name="programId"
-                defaultValue={group.programId}
-                className="col-span-3 h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              >
-                {programs.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-              <input
-                type="time"
-                name="startTime"
-                defaultValue={group.startTime}
-                className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              />
-              <input
-                type="time"
-                name="endTime"
-                defaultValue={group.endTime}
-                className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              />
-              <select
-                name="teacherId"
-                defaultValue={group.teacherId || ""}
-                className="col-span-2 h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              >
-                <option value="">No teacher</option>
-                {teachers.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-              <select
-                name="status"
-                defaultValue={group.status}
-                className="col-span-2 h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-              >
-                <option value="NEW">NEW</option>
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="FINISHING">FINISHING</option>
-                <option value="EXPIRED">EXPIRED</option>
-              </select>
-              <button className="col-span-6 h-10 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 transition">
-                Save Changes
-              </button>
-            </form>
-
-            {/* Students list */}
-            {group.students.length > 0 && (
+        </label>
+        <button className="btn">{g ? "Сохранить" : "Создать группу"}</button>
+      </>
+    );
+  }
+  return (
+    <>
+      <header className="page-header">
+        <div>
+          <div className="eyebrow">ОБУЧЕНИЕ</div>
+          <h1>Группы</h1>
+          <p>Программы, преподаватели и стоимость занятий.</p>
+        </div>
+        <Link
+          className="btn secondary"
+          href={archived ? "/admin/groups" : "/admin/groups?archived=1"}
+        >
+          {archived ? "Активные группы" : "Архив групп"}
+        </Link>
+      </header>
+      <form className="filters">
+        <input
+          name="q"
+          defaultValue={q}
+          placeholder="Название группы"
+          aria-label="Группа"
+        />
+        <input name="archived" type="hidden" value={archived ? "1" : "0"} />
+        <select
+          name="teacherId"
+          defaultValue={sp.teacherId || ""}
+          aria-label="Преподаватель"
+        >
+          <option value="">Все преподаватели</option>
+          {teachers.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+        <button className="btn">Найти</button>
+      </form>
+      <details className="panel" style={{ marginBottom: 24 }}>
+        <summary className="details-summary">
+          <h2>Новая группа</h2>
+        </summary>
+        <ActionForm action={saveGroup} className="form-grid">
+          {fields()}
+        </ActionForm>
+      </details>
+      <div className="stack">
+        {groups.map((g) => (
+          <details className="panel" key={g.id}>
+            <summary className="details-summary">
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                  Students ({group.students.length})
+                <strong>{g.name}</strong>
+                <p className="muted">
+                  {g.program.name} · {g.teacher?.name || "Без преподавателя"}
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {group.students.map((s) => (
-                    <Link
-                      key={s.id}
-                      href={`/admin/students/${s.id}`}
-                      className="px-3 py-1 bg-gray-100 rounded-full text-sm text-gray-700 hover:bg-gray-200 transition"
-                    >
-                      {s.name}
-                    </Link>
-                  ))}
-                </div>
+                <small className="muted">
+                  {g.schedule === "MWF" ? "Пн / Ср / Пт" : "Вт / Чт / Сб"} ·{" "}
+                  {g.startTime}–{g.endTime} · {g._count.students} учеников
+                </small>
               </div>
-            )}
-          </div>
+              <div>
+                <span className="badge blue">{statusLabels[g.status]}</span>
+                <p>{money(g.monthlyFee)}</p>
+              </div>
+            </summary>
+            <ActionForm action={saveGroup} className="form-grid">
+              {fields(g)}
+            </ActionForm>
+            <div className="filters" style={{ marginTop: 20, marginBottom: 0 }}>
+              <Link
+                className="btn secondary"
+                href={"/admin/students?groupId=" + g.id}
+              >
+                Ученики группы
+              </Link>
+              <ActionForm action={archiveGroup}>
+                <input name="id" type="hidden" value={g.id} />
+                <input
+                  name="restore"
+                  type="hidden"
+                  value={archived ? "1" : "0"}
+                />
+                <button className="btn secondary">
+                  {archived ? "Восстановить" : "В архив"}
+                </button>
+              </ActionForm>
+            </div>
+          </details>
         ))}
       </div>
-    </div>
-  );
-}
-
-function Chip({ label }: { label: string }) {
-  return (
-    <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-semibold">
-      {label}
-    </span>
+      {!groups.length && <p className="empty">Группы не найдены</p>}
+      <Pagination
+        page={page}
+        total={total}
+        size={20}
+        base="/admin/groups"
+        params={{
+          q,
+          teacherId: sp.teacherId || "",
+          archived: archived ? "1" : "0",
+        }}
+      />
+    </>
   );
 }

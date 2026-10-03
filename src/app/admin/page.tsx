@@ -1,184 +1,219 @@
+import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
+import { debtSummary } from "@/lib/dashboard";
+import { dateKey, fmtDate, money, monthWindow } from "@/lib/format";
 import Link from "next/link";
-import { GroupStatus, ScheduleType, Prisma } from "@prisma/client";
-
-export const revalidate = 30;
-
-function parseEnum<T extends Record<string, string>>(e: T, v?: string) {
-  if (!v) return undefined;
-  return Object.values(e).includes(v) ? (v as T[keyof T]) : undefined;
-}
-
-function spStr(v: string | string[] | undefined) {
-  return typeof v === "string" ? v : undefined;
-}
-
-type SP = Record<string, string | string[] | undefined>;
-
-export default async function AdminDashboard({ searchParams }: { searchParams: Promise<SP> }) {
-  const sp = await searchParams;
-
-  // Get current user role
-  const cookieStore = await cookies();
-  const userId = cookieStore.get("userId")?.value;
-  const currentUser = userId
-    ? await prisma.user.findUnique({ where: { id: userId }, select: { role: true } })
-    : null;
-  const isDirector = currentUser?.role === "DIRECTOR";
-
-  const q = (spStr(sp.q) ?? "").trim();
-  const status = parseEnum(GroupStatus, spStr(sp.status));
-  const schedule = parseEnum(ScheduleType, spStr(sp.schedule));
-
-  const where: Prisma.GroupWhereInput = {
-    ...(status ? { status } : {}),
-    ...(schedule ? { schedule } : {}),
-    ...(q ? {
-      OR: [
-        { name: { contains: q, mode: "insensitive" } },
-        { teacher: { is: { name: { contains: q, mode: "insensitive" } } } },
-        { program: { is: { name: { contains: q, mode: "insensitive" } } } },
-      ],
-    } : {}),
-  };
-
-  // Parallel queries
-  const [totalStudents, totalTeachers, totalSupports, totalReports, groups, monthRevenue] =
-    await Promise.all([
-      prisma.student.count(),
-      prisma.user.count({ where: { role: "TEACHER" } }),
-      prisma.user.count({ where: { role: "SUPPORT" } }),
-      prisma.report.count(),
-      prisma.group.findMany({
-        where,
-        include: { teacher: true, students: true, program: true },
-        orderBy: { createdAt: "desc" },
-        take: 200,
-      }),
-      isDirector
-        ? prisma.payment.aggregate({
+export default async function Dashboard() {
+  const user = await requireRole("ADMIN", "DIRECTOR");
+  const today = dateKey();
+  const { start, end, month } = monthWindow(today.slice(0, 7));
+  const now = new Date();
+  const weekDay = new Date(today + "T12:00:00Z").getUTCDay();
+  const schedule =
+    weekDay === 0 ? null : [1, 3, 5].includes(weekDay) ? "MWF" : "TTS";
+  const [
+    students,
+    newLeads,
+    due,
+    lessons,
+    absent,
+    debt,
+    followups,
+    latest,
+    finance,
+  ] = await Promise.all([
+    prisma.student.count({ where: { archivedAt: null } }),
+    prisma.lead.count({ where: { status: "NEW", archivedAt: null } }),
+    prisma.lead.count({
+      where: {
+        archivedAt: null,
+        status: { in: ["NEW", "ACTIVE", "FROZEN"] },
+        followUpAt: { lte: now },
+      },
+    }),
+    schedule
+      ? prisma.group.findMany({
+          where: { archivedAt: null, schedule },
+          orderBy: { startTime: "asc" },
+          select: {
+            id: true,
+            name: true,
+            startTime: true,
+            endTime: true,
+            teacher: { select: { name: true } },
+            _count: { select: { students: { where: { archivedAt: null } } } },
+          },
+        })
+      : Promise.resolve([]),
+    prisma.report.count({ where: { dateKey: today, attendance: "ABSENT" } }),
+    debtSummary(month),
+    prisma.lead.findMany({
+      where: {
+        archivedAt: null,
+        status: { in: ["NEW", "ACTIVE", "FROZEN"] },
+        followUpAt: { lte: new Date(today + "T23:59:59+05:00") },
+      },
+      orderBy: { followUpAt: "asc" },
+      take: 6,
+      select: { id: true, name: true, phone: true, followUpAt: true },
+    }),
+    prisma.lead.findMany({
+      where: { archivedAt: null, status: "NEW" },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      select: { id: true, name: true, program: true, source: true },
+    }),
+    user.role === "DIRECTOR"
+      ? Promise.all([
+          prisma.payment.aggregate({
             where: {
-              periodStart: { gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+              periodStart: { gte: start, lt: end },
               status: { in: ["PAID", "PARTIAL"] },
             },
+            _sum: { paidAmount: true },
+          }),
+          prisma.expense.aggregate({
+            where: { date: { gte: start, lt: end } },
             _sum: { amount: true },
-          })
-        : null,
-    ]);
-
-  const fmt = (n: number) => new Intl.NumberFormat("ru-RU").format(n);
-
+          }),
+        ])
+      : Promise.resolve(null),
+  ]);
   return (
-    <div className="space-y-10 max-w-6xl">
-      <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Students — hidden for ADMIN */}
-        <StatCard
-          title="Students"
-          value={isDirector ? String(totalStudents) : "••••"}
-          locked={!isDirector}
-        />
-        <StatCard title="Teachers" value={String(totalTeachers)} />
-        <StatCard title="Support Staff" value={String(totalSupports)} />
-        <StatCard title="Reports" value={String(totalReports)} />
-      </div>
-
-      {/* Director-only revenue card */}
-      {isDirector && monthRevenue && (
-        <div className="bg-gray-900 rounded-2xl p-6 text-white">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Revenue this month</p>
-          <p className="text-3xl font-bold mt-1">{fmt(monthRevenue._sum.amount ?? 0)} UZS</p>
+    <>
+      <header className="page-header">
+        <div>
+          <div className="eyebrow">EIT OPERATING SYSTEM</div>
+          <h1>Рабочий день</h1>
+          <p>
+            {new Intl.DateTimeFormat("ru-RU", {
+              timeZone: "Asia/Samarkand",
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+            }).format(now)}{" "}
+            · Здравствуйте, {user.name}.
+          </p>
         </div>
-      )}
-
-      {/* Groups */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-4">
-          <h2 className="font-semibold text-gray-900">
-            Groups
-            <span className="ml-2 text-sm font-normal text-gray-400">{groups.length} found</span>
-          </h2>
-
-          <form className="flex items-center gap-3 flex-wrap">
-            <input
-              name="q"
-              defaultValue={q}
-              placeholder="Search groups / teacher / program"
-              className="h-10 border border-gray-200 rounded-xl px-4 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-gray-900"
-            />
-            <select name="status" defaultValue={status ?? ""} className="h-10 border border-gray-200 rounded-xl px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900">
-              <option value="">All statuses</option>
-              <option value="NEW">NEW</option>
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="FINISHING">FINISHING</option>
-              <option value="EXPIRED">EXPIRED</option>
-            </select>
-            <select name="schedule" defaultValue={schedule ?? ""} className="h-10 border border-gray-200 rounded-xl px-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-900">
-              <option value="">All schedules</option>
-              <option value="MWF">MWF</option>
-              <option value="TTS">TTS</option>
-            </select>
-            <button className="h-10 px-5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">
-              Search
-            </button>
-            <Link href="/admin" className="h-10 px-4 border border-gray-200 rounded-xl text-sm text-gray-600 flex items-center hover:bg-gray-50 transition">
-              Reset
+        <Link href="/admin/leads" className="btn">
+          К новым заявкам →
+        </Link>
+      </header>
+      <div className="metric-grid">
+        <Link href="/admin/students" className="metric">
+          <span className="metric-label">Активные ученики</span>
+          <strong>{students}</strong>
+          <small>Карточки и группы</small>
+        </Link>
+        <Link href="/admin/leads?status=NEW" className="metric accent">
+          <span className="metric-label">Новые лиды</span>
+          <strong>{newLeads}</strong>
+          <small>Ожидают первого контакта</small>
+        </Link>
+        <Link href="/admin/leads?due=1" className="metric">
+          <span className="metric-label">Пора связаться</span>
+          <strong>{due}</strong>
+          <small>Срок контакта наступил</small>
+        </Link>
+        <Link href="/admin/payments" className="metric">
+          <span className="metric-label">Ученики с долгом</span>
+          <strong>{debt.count}</strong>
+          <small>
+            {money(debt.total)} · {month}
+          </small>
+        </Link>
+      </div>
+      <div className="two-col">
+        <section className="panel">
+          <div className="panel-title">
+            <h2>Занятия сегодня</h2>
+            <Link className="badge" href="/admin/timetable">
+              Расписание →
             </Link>
-          </form>
-        </div>
-
-        {groups.length === 0 ? (
-          <div className="px-6 py-8 text-sm text-gray-400">No groups found.</div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {groups.map((group) => (
-              <div key={group.id} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition">
-                <div>
-                  <p className="font-semibold text-gray-900">{group.name}</p>
-                  <p className="text-sm text-gray-500">
-                    {group.teacher?.name ?? "No teacher"} · {group.program?.name ?? "—"} ·{" "}
-                    {isDirector ? `${group.students.length} students` : "•• students"}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <StatusBadge status={group.status} />
-                  <span className="text-xs text-gray-400">{group.schedule}</span>
-                </div>
-              </div>
-            ))}
           </div>
-        )}
+          {lessons.map((g) => (
+            <div className="list-row" key={g.id}>
+              <span className="badge blue">
+                {g.startTime}–{g.endTime}
+              </span>
+              <div style={{ flex: 1 }}>
+                <strong>{g.name}</strong>
+                <small>
+                  {g.teacher?.name || "Без преподавателя"} · {g._count.students}{" "}
+                  учеников
+                </small>
+              </div>
+            </div>
+          ))}
+          {!lessons.length && (
+            <p className="empty">На сегодня занятий по расписанию нет.</p>
+          )}
+          <Link className="list-row muted" href="/admin/attendance">
+            Отсутствуют по сегодняшним отметкам <strong>{absent}</strong>
+          </Link>
+        </section>
+        <section className="panel">
+          <div className="panel-title">
+            <h2>Контакты на сегодня</h2>
+            <Link className="badge" href="/admin/leads?due=1">
+              Все задачи →
+            </Link>
+          </div>
+          {followups.map((l) => (
+            <Link href={"/admin/leads/" + l.id} className="list-row" key={l.id}>
+              <div>
+                <strong>{l.name}</strong>
+                <small>{l.phone || "Нет телефона"}</small>
+              </div>
+              <small className="error-text">{fmtDate(l.followUpAt!)}</small>
+            </Link>
+          ))}
+          {!followups.length && (
+            <p className="empty">Запланированных контактов на сегодня нет.</p>
+          )}
+          <h2 style={{ marginTop: 28 }}>Последние заявки</h2>
+          {latest.map((l) => (
+            <Link href={"/admin/leads/" + l.id} className="list-row" key={l.id}>
+              <div>
+                <strong>{l.name}</strong>
+                <small>
+                  {l.program || "Курс не указан"} · {l.source}
+                </small>
+              </div>
+              <span>→</span>
+            </Link>
+          ))}
+        </section>
       </div>
-    </div>
-  );
-}
-
-function StatCard({ title, value, locked }: { title: string; value: string; locked?: boolean }) {
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition">
-      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{title}</p>
-      <p className={`text-3xl font-bold mt-2 ${locked ? "text-gray-300 tracking-widest" : "text-gray-900"}`}>
-        {value}
-      </p>
-      {locked && <p className="text-xs text-gray-300 mt-1">Director only</p>}
-    </div>
-  );
-}
-
-const STATUS_STYLES: Record<string, string> = {
-  NEW: "bg-blue-100 text-blue-700",
-  ACTIVE: "bg-green-100 text-green-700",
-  FINISHING: "bg-yellow-100 text-yellow-700",
-  EXPIRED: "bg-red-100 text-red-700",
-};
-
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <span className={`text-xs font-semibold px-2 py-1 rounded-full ${STATUS_STYLES[status] ?? "bg-gray-100 text-gray-600"}`}>
-      {status}
-    </span>
+      {finance && (
+        <section className="panel" style={{ marginTop: 24 }}>
+          <div className="panel-title">
+            <h2>Финансы · {month}</h2>
+            <Link className="badge" href="/admin/analytics">
+              Аналитика →
+            </Link>
+          </div>
+          <div className="metric-grid" style={{ margin: 0 }}>
+            <div>
+              <p className="muted">Получено за учебный период</p>
+              <h2>{money(finance[0]._sum.paidAmount || 0)}</h2>
+            </div>
+            <div>
+              <p className="muted">Расходы</p>
+              <h2>{money(finance[1]._sum.amount || 0)}</h2>
+            </div>
+            <div>
+              <p className="muted">Разница</p>
+              <h2>
+                {money(
+                  (finance[0]._sum.paidAmount || 0) -
+                    (finance[1]._sum.amount || 0),
+                )}
+              </h2>
+            </div>
+          </div>
+        </section>
+      )}
+    </>
   );
 }

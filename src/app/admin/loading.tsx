@@ -1,4 +1,6 @@
-export default function Loading() {
+import { requireRole } from "@/lib/auth";
+export default async function Loading() {
+  await requireRole("ADMIN", "DIRECTOR");
   return (
     <div className="space-y-6 animate-pulse">
       {/* Header skeleton */}
@@ -7,7 +9,10 @@ export default function Loading() {
       {/* Cards skeleton */}
       <div className="grid grid-cols-4 gap-6">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-3">
+          <div
+            key={i}
+            className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 space-y-3"
+          >
             <div className="h-3 w-24 bg-gray-200 rounded" />
             <div className="h-8 w-16 bg-gray-200 rounded" />
           </div>

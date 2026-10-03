@@ -1,20 +1,16 @@
+import { apiUser, sameOrigin } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import crypto from "crypto";
 
-// TODO: здесь должна быть твоя реальная проверка авторизации (cookie/session)
-// Сейчас минимально: требуем x-admin-secret, но это сервер-сервер.
-// Для UI позже заменим на проверку logged-in ADMIN.
-function randomCode(len = 10) {
+function randomCode(len = 32) {
   return crypto.randomBytes(16).toString("hex").slice(0, len);
 }
 
 export async function POST(req: Request) {
-  // Временная защита (пока не подключили нормальную проверку сессии)
-  const adminSecret = req.headers.get("x-admin-secret");
-  if (!adminSecret || adminSecret !== process.env.ADMIN_API_SECRET) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const user = await apiUser(["ADMIN", "DIRECTOR"]);
+  if (!user || !sameOrigin(req))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json().catch(() => ({}));
   const studentId = body?.studentId as string | undefined;
@@ -33,15 +29,24 @@ export async function POST(req: Request) {
   }
 
   for (let i = 0; i < 5; i++) {
-    const code = `eit${randomCode(10)}`;
+    const code = `eit${randomCode(32)}`;
     try {
       const invite = await prisma.parentInvite.create({
-        data: { code, status: "ACTIVE", studentId: student.id },
+        data: {
+          code,
+          status: "ACTIVE",
+          createdById: user.id,
+          expiresAt: new Date(Date.now() + 7 * 86400000),
+          studentId: student.id,
+        },
       });
 
       return NextResponse.json({ ok: true, code: invite.code });
     } catch {}
   }
 
-  return NextResponse.json({ error: "Failed to generate code" }, { status: 500 });
+  return NextResponse.json(
+    { error: "Failed to generate code" },
+    { status: 500 },
+  );
 }

@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  turbopack: { root: process.cwd() },
+  outputFileTracingRoot: process.cwd(),
   experimental: {
     staleTimes: {
       dynamic: 30,   // кэш динамических страниц 30 сек

@@ -24,10 +24,6 @@ export default function CreateParentInviteButton({ studentId }: { studentId: str
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-admin-secret": process.env.NEXT_PUBLIC_ADMIN_UI_SECRET || "",
-          // ВАЖНО: браузер не должен знать ADMIN_API_SECRET.
-          // Поэтому этот endpoint нельзя напрямую дергать с клиента.
-          // Решение ниже в Шаге 3.
         },
         body: JSON.stringify({ studentId }),
       });

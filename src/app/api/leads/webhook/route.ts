@@ -1,91 +1,164 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { sendLeadEvent } from "@/lib/meta-events";
+import { createHash, timingSafeEqual } from "node:crypto";
 
-// Секретный токен для защиты webhook
-// Добавь в .env: WEBHOOK_SECRET=какой_угодно_длинный_токен
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+function authorize(req: NextRequest) {
+  const secret = process.env.WEBHOOK_SECRET;
+  if (!secret) {
+    return NextResponse.json(
+      { error: "Webhook is not configured" },
+      { status: 503 },
+    );
+  }
+  const token =
+    req.headers.get("authorization")?.replace(/^Bearer /, "") ||
+    req.nextUrl.searchParams.get("secret") ||
+    "";
+  const expected = createHash("sha256").update(secret).digest();
+  const received = createHash("sha256").update(token).digest();
+  if (!timingSafeEqual(expected, received)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+}
+
+function textField(
+  body: Record<string, unknown>,
+  keys: string[],
+  limit: number,
+) {
+  for (const key of keys) {
+    if (body[key] == null || body[key] === "") continue;
+    if (typeof body[key] !== "string") throw new Error(`Invalid ${key}`);
+    const value = body[key].trim();
+    if (value) return value.slice(0, limit);
+  }
+  return null;
+}
+
+// Use the existing primary key to make retries atomic without a database migration.
+function metaLeadKey(metaLeadId: string) {
+  const hash = createHash("sha256")
+    .update(`meta-lead:${metaLeadId}`)
+    .digest("hex");
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-8${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
 
 export async function POST(req: NextRequest) {
+  const denied = authorize(req);
+  if (denied) return denied;
+
+  let body: Record<string, unknown>;
+  let data;
   try {
-    // ── Проверка секрета ──────────────────────────────────
-    const authHeader = req.headers.get("authorization");
-    const tokenFromQuery = req.nextUrl.searchParams.get("secret");
-
-    const token = authHeader?.replace("Bearer ", "") || tokenFromQuery;
-
-    if (WEBHOOK_SECRET && token !== WEBHOOK_SECRET) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    body = await req.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new Error("Expected a JSON object");
     }
+    const name = textField(
+      body,
+      ["name", "full_name", "first_name", "contact_name", "subscriber_name"],
+      255,
+    );
+    if (!name) throw new Error("Name is required");
+    if (
+      body.metaLeadId != null &&
+      (typeof body.metaLeadId !== "string" ||
+        !/^\d{5,50}$/.test(body.metaLeadId))
+    ) {
+      throw new Error("Invalid metaLeadId");
+    }
+    if (body.dryRun != null && typeof body.dryRun !== "boolean") {
+      throw new Error("dryRun must be a boolean");
+    }
+    data = {
+      ...(body.metaLeadId
+        ? { id: metaLeadKey(body.metaLeadId as string) }
+        : {}),
+      name,
+      phone: textField(
+        body,
+        ["phone", "phone_number", "contact_phone", "subscriber_phone"],
+        50,
+      ),
+      source:
+        textField(body, ["source", "platform", "channel", "utm_source"], 100) ||
+        "webhook",
+      program: textField(body, ["program", "course", "interest", "tag"], 100),
+      note: textField(
+        body,
+        ["note", "message", "comment", "last_message"],
+        1000,
+      ),
+      status: "NEW" as const,
+    };
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid lead payload: provide a name and valid text fields" },
+      { status: 400 },
+    );
+  }
 
-    // ── Читаем тело запроса ───────────────────────────────
-    const body = await req.json();
+  if (body.dryRun === true) {
+    return NextResponse.json({ ok: true, dryRun: true });
+  }
 
-    // Поддерживаем разные форматы от разных сервисов:
-    // smmbot, ManyChat, Zapier — у всех разная структура
-    const name =
-      body.name ||
-      body.full_name ||
-      body.first_name ||
-      body.contact_name ||
-      body.subscriber_name ||
-      "Unknown";
+  try {
+    const formId =
+      typeof body.formId === "string"
+        ? body.formId
+        : data.note?.match(/Form ID:\s*(\d{5,50})/)?.[1];
+    if (!data.program && formId) {
+      const mapping = await prisma.leadForm.findUnique({
+        where: { id: formId },
+      });
+      if (mapping) data.program = mapping.program;
+    }
+    const lead = await prisma.lead.create({ data });
 
-    const phone =
-      body.phone ||
-      body.phone_number ||
-      body.contact_phone ||
-      body.subscriber_phone ||
-      null;
-
-    const source =
-      body.source ||
-      body.platform ||
-      body.channel ||
-      body.utm_source ||
-      "webhook";
-
-    const program =
-      body.program ||
-      body.course ||
-      body.interest ||
-      body.tag ||
-      null;
-
-    const note =
-      body.note ||
-      body.message ||
-      body.comment ||
-      body.last_message ||
-      null;
-
-    // ── Создаём лида ──────────────────────────────────────
-    const lead = await prisma.lead.create({
-      data: {
-        name: String(name).trim().slice(0, 255),
-        phone: phone ? String(phone).trim().slice(0, 50) : null,
-        source: source ? String(source).trim().slice(0, 100) : "webhook",
-        program: program ? String(program).trim().slice(0, 100) : null,
-        note: note ? String(note).trim().slice(0, 1000) : null,
-        status: "NEW",
-      },
-    });
+    // Отправляем событие "Lead" в Meta через Make
+    after(() =>
+      sendLeadEvent({
+        event: "Lead",
+        leadId: lead.id,
+        phone: lead.phone,
+        source: lead.source,
+        program: lead.program,
+      }),
+    );
 
     return NextResponse.json({
       ok: true,
       lead: { id: lead.id, name: lead.name, status: lead.status },
     });
-
   } catch (err) {
-    console.error("WEBHOOK_ERROR:", err);
+    if (
+      data.id &&
+      typeof err === "object" &&
+      err !== null &&
+      "code" in err &&
+      err.code === "P2002"
+    ) {
+      try {
+        const lead = await prisma.lead.findUnique({
+          where: { id: data.id },
+          select: { id: true, name: true, status: true },
+        });
+        if (lead) return NextResponse.json({ ok: true, duplicate: true, lead });
+      } catch {
+        // Return a retryable error if the existing row cannot be read.
+      }
+    }
+    console.error("WEBHOOK_ERROR: lead could not be saved");
     return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
 
-// Для проверки что webhook живой (GET запрос)
 export async function GET(req: NextRequest) {
-  const tokenFromQuery = req.nextUrl.searchParams.get("secret");
-  if (WEBHOOK_SECRET && tokenFromQuery !== WEBHOOK_SECRET) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  return NextResponse.json({ ok: true, message: "EIT LC Leads Webhook is alive 🚀" });
+  const denied = authorize(req);
+  if (denied) return denied;
+  return NextResponse.json({
+    ok: true,
+    message: "EIT LC Leads Webhook is alive 🚀",
+  });
 }

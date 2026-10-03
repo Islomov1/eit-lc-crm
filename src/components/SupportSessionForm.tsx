@@ -1,5 +1,6 @@
 "use client";
 
+import { ActionForm } from "./ActionForm";
 import { useMemo, useState } from "react";
 
 type StudentOption = {
@@ -116,7 +117,9 @@ const COMMENT_TEMPLATES = [
 
 /* ── helpers ─────────────────────────────────────────────── */
 
-function pad(n: number) { return String(n).padStart(2, "0"); }
+function pad(n: number) {
+  return String(n).padStart(2, "0");
+}
 
 function getTodayDateValue(date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -126,8 +129,10 @@ function roundTo5(date = new Date()) {
   const d = new Date(date);
   d.setSeconds(0, 0);
   const m = Math.ceil(d.getMinutes() / 5) * 5;
-  if (m === 60) { d.setHours(d.getHours() + 1); d.setMinutes(0); }
-  else d.setMinutes(m);
+  if (m === 60) {
+    d.setHours(d.getHours() + 1);
+    d.setMinutes(0);
+  } else d.setMinutes(m);
   return d;
 }
 
@@ -144,7 +149,10 @@ function addMinutes(timeHHMM: string, mins: number) {
 
 /* ── component ───────────────────────────────────────────── */
 
-export default function SupportSessionForm({ students, action }: SupportSessionFormProps) {
+export default function SupportSessionForm({
+  students,
+  action,
+}: SupportSessionFormProps) {
   const now = roundTo5();
 
   const [query, setQuery] = useState("");
@@ -155,37 +163,48 @@ export default function SupportSessionForm({ students, action }: SupportSessionF
   const [comment, setComment] = useState("");
   const [sendToParents, setSendToParents] = useState(true);
 
-  const endTime = useMemo(() => addMinutes(startTime, duration), [startTime, duration]);
+  const endTime = useMemo(
+    () => addMinutes(startTime, duration),
+    [startTime, duration],
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return students.slice(0, 20);
-    return students.filter((s) =>
-      `${s.name} ${s.groupName ?? ""}`.toLowerCase().includes(q)
-    ).slice(0, 30);
+    return students
+      .filter((s) => `${s.name} ${s.groupName ?? ""}`.toLowerCase().includes(q))
+      .slice(0, 30);
   }, [query, students]);
 
   const selected = students.find((s) => s.id === selectedId) ?? null;
 
   function applyTemplate(t: { ru: string; uz: string }) {
     const text = `RU: ${t.ru}\nUZ: ${t.uz}`;
-    setComment((prev) => prev.trim() ? `${prev}\n\n${text}` : text);
+    setComment((prev) => (prev.trim() ? `${prev}\n\n${text}` : text));
   }
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
       <div>
-        <h2 className="font-semibold text-gray-900">Log Support Session</h2>
-        <p className="text-xs text-gray-400 mt-1">Выберите ученика, время и добавьте комментарий</p>
+        <h2 className="font-semibold text-gray-900">
+          Добавить занятие поддержки
+        </h2>
+        <p className="text-xs text-gray-400 mt-1">
+          Выберите ученика, время и добавьте комментарий
+        </p>
       </div>
 
-      <form action={action} className="space-y-6">
+      <ActionForm action={action} className="space-y-6">
         {/* Hidden fields */}
         <input type="hidden" name="studentId" value={selectedId} />
         <input type="hidden" name="start" value={`${date}T${startTime}`} />
         <input type="hidden" name="end" value={`${date}T${endTime}`} />
         <input type="hidden" name="comment" value={comment} />
-        <input type="hidden" name="sendToParents" value={sendToParents ? "1" : "0"} />
+        <input
+          type="hidden"
+          name="sendToParents"
+          value={sendToParents ? "1" : "0"}
+        />
 
         {/* Student search + selected */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -202,7 +221,9 @@ export default function SupportSessionForm({ students, action }: SupportSessionF
             />
             <div className="border border-gray-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
               {filtered.length === 0 ? (
-                <div className="p-3 text-sm text-gray-400">Ничего не найдено</div>
+                <div className="p-3 text-sm text-gray-400">
+                  Ничего не найдено
+                </div>
               ) : (
                 filtered.map((s) => {
                   const active = s.id === selectedId;
@@ -216,7 +237,9 @@ export default function SupportSessionForm({ students, action }: SupportSessionF
                       }`}
                     >
                       <span className="font-medium">{s.name}</span>
-                      <span className={`ml-2 text-xs ${active ? "text-gray-300" : "text-gray-400"}`}>
+                      <span
+                        className={`ml-2 text-xs ${active ? "text-gray-300" : "text-gray-400"}`}
+                      >
                         {s.groupName ?? "Без группы"}
                       </span>
                     </button>
@@ -234,10 +257,14 @@ export default function SupportSessionForm({ students, action }: SupportSessionF
               {selected ? (
                 <>
                   <p className="font-semibold text-gray-900">{selected.name}</p>
-                  <p className="text-sm text-gray-500 mt-0.5">{selected.groupName ?? "Без группы"}</p>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {selected.groupName ?? "Без группы"}
+                  </p>
                 </>
               ) : (
-                <p className="text-sm text-gray-400">Сначала выберите ученика</p>
+                <p className="text-sm text-gray-400">
+                  Сначала выберите ученика
+                </p>
               )}
             </div>
 
@@ -258,7 +285,9 @@ export default function SupportSessionForm({ students, action }: SupportSessionF
         {/* Date + Time */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Дата / Sana</label>
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Дата / Sana
+            </label>
             <input
               type="date"
               value={date}
@@ -267,7 +296,9 @@ export default function SupportSessionForm({ students, action }: SupportSessionF
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Начало / Boshlanishi</label>
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Начало / Boshlanishi
+            </label>
             <input
               type="time"
               step={300}
@@ -277,19 +308,25 @@ export default function SupportSessionForm({ students, action }: SupportSessionF
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Длительность</label>
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Длительность
+            </label>
             <select
               value={duration}
               onChange={(e) => setDuration(Number(e.target.value))}
               className="w-full h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
             >
               {DURATION_OPTIONS.map((m) => (
-                <option key={m} value={m}>{m} мин</option>
+                <option key={m} value={m}>
+                  {m} мин
+                </option>
               ))}
             </select>
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Конец (авто)</label>
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Конец (авто)
+            </label>
             <input
               type="time"
               value={endTime}
@@ -338,7 +375,9 @@ export default function SupportSessionForm({ students, action }: SupportSessionF
             rows={6}
             className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 resize-y"
           />
-          <p className="text-xs text-gray-400">Шаблоны можно комбинировать. Свой текст тоже можно добавить.</p>
+          <p className="text-xs text-gray-400">
+            Шаблоны можно комбинировать. Свой текст тоже можно добавить.
+          </p>
         </div>
 
         {/* Submit */}
@@ -347,9 +386,9 @@ export default function SupportSessionForm({ students, action }: SupportSessionF
           disabled={!selectedId}
           className="w-full h-12 bg-gray-900 text-white rounded-xl font-semibold text-sm hover:bg-gray-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Save Session
+          Сохранить занятие
         </button>
-      </form>
+      </ActionForm>
     </div>
   );
 }

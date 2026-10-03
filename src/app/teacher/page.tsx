@@ -1,4 +1,10 @@
-import { cookies } from "next/headers";
+import { after } from "next/server";
+import { dateKey as samarkandDate } from "@/lib/format";
+import { recordAttendance } from "@/lib/attendance";
+import { ActionForm } from "@/components/ActionForm";
+
+import { requireRole } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import Link from "next/link";
@@ -8,24 +14,23 @@ import { prisma } from "@/lib/prisma";
 
 /* ── helpers ─────────────────────────────────────────────── */
 
-function getLocalDateKey(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
+const getLocalDateKey = samarkandDate;
 
 function formatToday(date: Date) {
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "long", year: "numeric" }).format(date);
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(date);
 }
 
 /* ── create report ───────────────────────────────────────── */
 
 async function createReport(formData: FormData) {
   "use server";
+  await requireRole("TEACHER");
 
-  const cookieStore = await cookies();
-  const teacherId = cookieStore.get("userId")?.value;
+  const teacherId = (await getCurrentUser())?.id;
   const studentId = formData.get("studentId")?.toString();
   const groupId = formData.get("groupId")?.toString();
   const attendance = formData.get("attendance")?.toString();
@@ -44,28 +49,41 @@ async function createReport(formData: FormData) {
   const homeworkValue = homework as HomeworkStatus;
   const dateKey = getLocalDateKey(new Date());
 
-  let report;
-  try {
-    report = await prisma.report.create({
-      data: { studentId, teacherId: teacher.id, groupId, dateKey, attendance: attendanceValue, homework: homeworkValue, comment },
-    });
-  } catch {
-    return;
-  }
-
-  // ✅ groups instead of group
-  const student = await prisma.student.findUnique({
-    where: { id: studentId },
-    include: { parents: true, groups: true },
+  const report = await recordAttendance({
+    studentId,
+    groupId,
+    teacherId: teacher.id,
+    attendance: attendanceValue,
+    homework: homeworkValue,
+    comment: comment?.slice(0, 2000) || null,
+    dateKey,
   });
-  if (!student) return;
+  const student = await prisma.student.findUniqueOrThrow({
+    where: { id: studentId },
+    select: { name: true },
+  });
+  const group = await prisma.group.findUniqueOrThrow({
+    where: { id: groupId },
+    select: { name: true },
+  });
+  const groupName = group.name;
 
-  const groupName = student.groups[0]?.name ?? "-"; // ✅
-
-  const attendanceRu = attendanceValue === "PRESENT" ? "Присутствовал" : "Отсутствовал";
-  const homeworkRu = homeworkValue === "DONE" ? "Выполнено полностью" : homeworkValue === "PARTIAL" ? "Выполнено частично" : "Не выполнено";
-  const attendanceUz = attendanceValue === "PRESENT" ? "Darsda qatnashdi" : "Darsda qatnashmadi";
-  const homeworkUz = homeworkValue === "DONE" ? "To'liq bajarilgan" : homeworkValue === "PARTIAL" ? "Qisman bajarilgan" : "Bajarilmagan";
+  const attendanceRu =
+    attendanceValue === "PRESENT" ? "Присутствовал" : "Отсутствовал";
+  const homeworkRu =
+    homeworkValue === "DONE"
+      ? "Выполнено полностью"
+      : homeworkValue === "PARTIAL"
+        ? "Выполнено частично"
+        : "Не выполнено";
+  const attendanceUz =
+    attendanceValue === "PRESENT" ? "Darsda qatnashdi" : "Darsda qatnashmadi";
+  const homeworkUz =
+    homeworkValue === "DONE"
+      ? "To'liq bajarilgan"
+      : homeworkValue === "PARTIAL"
+        ? "Qisman bajarilgan"
+        : "Bajarilmagan";
 
   const message = `
 📚 ОТЧЁТ О ЗАНЯТИИ — EIT LC
@@ -91,11 +109,13 @@ Izoh: ${comment || "Mavjud emas"}
 Yubordi: ${teacher.name}
 `.trim();
 
-  await sendTelegramToStudentParents(
-    studentId,
-    message,
-    { type: "USER", id: teacher.id },
-    { sourceType: "REPORT", sourceId: report.id }
+  after(() =>
+    sendTelegramToStudentParents(
+      studentId,
+      message,
+      { type: "USER", id: teacher.id },
+      { sourceType: "REPORT", sourceId: report.id },
+    ),
   );
 
   revalidatePath("/teacher");
@@ -106,8 +126,8 @@ Yubordi: ${teacher.name}
 type Props = { searchParams?: Promise<{ schedule?: string }> };
 
 export default async function TeacherPage({ searchParams }: Props) {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get("userId")?.value;
+  await requireRole("TEACHER");
+  const userId = (await getCurrentUser())?.id;
   if (!userId) redirect("/login");
 
   const selectedSchedule: ScheduleType =
@@ -116,8 +136,14 @@ export default async function TeacherPage({ searchParams }: Props) {
   const [teacher, groups] = await Promise.all([
     prisma.user.findUnique({ where: { id: userId } }),
     prisma.group.findMany({
-      where: { schedule: selectedSchedule },
-      include: { students: { orderBy: { name: "asc" } } },
+      where: {
+        schedule: selectedSchedule,
+        teacherId: userId,
+        archivedAt: null,
+      },
+      include: {
+        students: { where: { archivedAt: null }, orderBy: { name: "asc" } },
+      },
       orderBy: [{ startTime: "asc" }, { name: "asc" }],
     }),
   ]);
@@ -134,14 +160,15 @@ export default async function TeacherPage({ searchParams }: Props) {
       dateKey,
       groupId: { in: myGroups.map((g) => g.id) },
     },
-    select: { studentId: true },
+    select: { studentId: true, groupId: true },
   });
 
-  const reportedStudentIds = new Set(todayReports.map((r) => r.studentId));
+  const reportedStudentIds = new Set(
+    todayReports.map((r) => `${r.studentId}:${r.groupId}`),
+  );
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-
       {/* Header */}
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
@@ -171,17 +198,25 @@ export default async function TeacherPage({ searchParams }: Props) {
       <div className="grid grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 text-center">
           <p className="text-2xl font-bold text-gray-900">{myGroups.length}</p>
-          <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wide">Groups</p>
+          <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wide">
+            Groups
+          </p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 text-center">
           <p className="text-2xl font-bold text-gray-900">
             {myGroups.reduce((s, g) => s + g.students.length, 0)}
           </p>
-          <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wide">Students</p>
+          <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wide">
+            Students
+          </p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 text-center">
-          <p className="text-2xl font-bold text-green-600">{reportedStudentIds.size}</p>
-          <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wide">Reported</p>
+          <p className="text-2xl font-bold text-green-600">
+            {reportedStudentIds.size}
+          </p>
+          <p className="text-xs text-gray-400 mt-1 font-medium uppercase tracking-wide">
+            Reported
+          </p>
         </div>
       </div>
 
@@ -195,8 +230,12 @@ export default async function TeacherPage({ searchParams }: Props) {
       {/* Groups */}
       <div className="space-y-4">
         {myGroups.map((group) => {
-          const reportedCount = group.students.filter((s) => reportedStudentIds.has(s.id)).length;
-          const allDone = reportedCount === group.students.length && group.students.length > 0;
+          const reportedCount = group.students.filter((s) =>
+            reportedStudentIds.has(`${s.id}:${group.id}`),
+          ).length;
+          const allDone =
+            reportedCount === group.students.length &&
+            group.students.length > 0;
 
           return (
             <details
@@ -208,7 +247,9 @@ export default async function TeacherPage({ searchParams }: Props) {
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <div className="flex items-center gap-3">
-                      <h2 className="font-semibold text-gray-900">{group.name}</h2>
+                      <h2 className="font-semibold text-gray-900">
+                        {group.name}
+                      </h2>
                       {allDone && (
                         <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">
                           ✓ All done
@@ -216,9 +257,12 @@ export default async function TeacherPage({ searchParams }: Props) {
                       )}
                     </div>
                     <p className="text-sm text-gray-500 mt-0.5">
-                      {group.schedule} · {group.startTime}–{group.endTime} · {group.students.length} students
+                      {group.schedule} · {group.startTime}–{group.endTime} ·{" "}
+                      {group.students.length} students
                       {reportedCount > 0 && (
-                        <span className="ml-2 text-green-600 font-medium">· {reportedCount} reported</span>
+                        <span className="ml-2 text-green-600 font-medium">
+                          · {reportedCount} reported
+                        </span>
                       )}
                     </p>
                   </div>
@@ -228,24 +272,36 @@ export default async function TeacherPage({ searchParams }: Props) {
 
               <div className="p-4 space-y-2">
                 {group.students.length === 0 ? (
-                  <p className="text-gray-400 text-sm p-2">No students in this group.</p>
+                  <p className="text-gray-400 text-sm p-2">
+                    No students in this group.
+                  </p>
                 ) : (
                   group.students.map((student) => {
-                    const reported = reportedStudentIds.has(student.id);
+                    const reported = reportedStudentIds.has(
+                      `${student.id}:${group.id}`,
+                    );
                     return (
-                      <form
+                      <ActionForm
                         key={student.id}
                         action={createReport}
                         className={`rounded-xl px-4 py-3 border transition ${
-                          reported ? "bg-green-50 border-green-200 opacity-60" : "bg-gray-50 border-gray-200"
+                          reported
+                            ? "bg-green-50 border-green-200 opacity-60"
+                            : "bg-gray-50 border-gray-200"
                         }`}
                       >
-                        <input type="hidden" name="studentId" value={student.id} />
+                        <input
+                          type="hidden"
+                          name="studentId"
+                          value={student.id}
+                        />
                         <input type="hidden" name="groupId" value={group.id} />
 
-                        <div className="grid items-center gap-3" style={{ gridTemplateColumns: "200px 120px 130px 1fr auto" }}>
+                        <div className="attendance-fields">
                           <div className="font-medium text-gray-900 text-sm flex items-center gap-2 min-w-0">
-                            {reported && <span className="text-green-500">✓</span>}
+                            {reported && (
+                              <span className="text-green-500">✓</span>
+                            )}
                             <span className="truncate">{student.name}</span>
                           </div>
                           <select
@@ -286,7 +342,7 @@ export default async function TeacherPage({ searchParams }: Props) {
                             </button>
                           )}
                         </div>
-                      </form>
+                      </ActionForm>
                     );
                   })
                 )}

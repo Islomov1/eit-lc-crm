@@ -43,6 +43,7 @@ async function telegramApi(method: string, body: Record<string, unknown>) {
 
   const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
+    signal: AbortSignal.timeout(10000),
     headers: {
       "Content-Type": "application/json",
     },

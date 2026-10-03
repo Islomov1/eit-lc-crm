@@ -1,4 +1,5 @@
-import { cookies } from "next/headers";
+import { requireRole } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { ReportsClient } from "@/components/ReportsClient";
@@ -27,11 +28,19 @@ function toKey(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
-type SP = { period?: string; groupId?: string; dateFrom?: string; dateTo?: string; month?: string };
+type SP = {
+  period?: string;
+  groupId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  month?: string;
+};
 
-export default async function TeacherReportsPage(props: { searchParams?: Promise<SP> }) {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get("userId")?.value;
+export default async function TeacherReportsPage(props: {
+  searchParams?: Promise<SP>;
+}) {
+  await requireRole("TEACHER");
+  const userId = (await getCurrentUser())?.id;
   if (!userId) redirect("/login");
 
   const teacher = await prisma.user.findUnique({ where: { id: userId } });
@@ -57,7 +66,8 @@ export default async function TeacherReportsPage(props: { searchParams?: Promise
     end.setDate(end.getDate() + 7);
   } else if (period === "month") {
     const b = getMonthBounds(month);
-    start = b.start; end = b.end;
+    start = b.start;
+    end = b.end;
   } else {
     start = new Date(dateFrom + "T00:00:00");
     end = new Date(dateTo + "T23:59:59");
@@ -72,27 +82,42 @@ export default async function TeacherReportsPage(props: { searchParams?: Promise
     select: { id: true, name: true },
   });
 
-  const groupIds = groupIdFilter ? [groupIdFilter] : myGroups.map((g) => g.id);
+  const groupIds = groupIdFilter
+    ? myGroups.filter((g) => g.id === groupIdFilter).map((g) => g.id)
+    : myGroups.map((g) => g.id);
 
   const [students, reports] = await Promise.all([
     prisma.student.findMany({
       where: { groups: { some: { id: { in: groupIds } } } },
-      select: { id: true, name: true, groups: { where: { id: { in: groupIds } }, select: { name: true } } },
+      select: {
+        id: true,
+        name: true,
+        groups: { where: { id: { in: groupIds } }, select: { name: true } },
+      },
       orderBy: { name: "asc" },
     }),
     prisma.report.findMany({
       where: {
         teacherId: userId,
-        groupId: groupIdFilter ? groupIdFilter : { in: groupIds },
-        dateKey: { gte: startKey, lte: endKey },
+        groupId: { in: groupIds },
+        dateKey: {
+          gte: startKey,
+          ...(period === "custom" ? { lte: endKey } : { lt: endKey }),
+        },
       },
-      select: { studentId: true, attendance: true, homework: true, dateKey: true },
+      select: {
+        studentId: true,
+        attendance: true,
+        homework: true,
+        dateKey: true,
+      },
     }),
   ]);
 
   const reportsByStudent = new Map<string, typeof reports>();
   for (const r of reports) {
-    if (!reportsByStudent.has(r.studentId)) reportsByStudent.set(r.studentId, []);
+    if (!reportsByStudent.has(r.studentId))
+      reportsByStudent.set(r.studentId, []);
     reportsByStudent.get(r.studentId)!.push(r);
   }
 
@@ -102,8 +127,10 @@ export default async function TeacherReportsPage(props: { searchParams?: Promise
     const present = sr.filter((r) => r.attendance === "PRESENT").length;
     const hwDone = sr.filter((r) => r.homework === "DONE").length;
     const hwPartial = sr.filter((r) => r.homework === "PARTIAL").length;
-    const attendancePct = total > 0 ? Math.round((present / total) * 100) : null;
-    const hwPct = total > 0 ? Math.round(((hwDone + hwPartial) / total) * 100) : null;
+    const attendancePct =
+      total > 0 ? Math.round((present / total) * 100) : null;
+    const hwPct =
+      total > 0 ? Math.round(((hwDone + hwPartial) / total) * 100) : null;
     return {
       id: s.id,
       name: s.name,

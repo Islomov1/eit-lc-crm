@@ -21,6 +21,8 @@ model User {
   supportSessions SupportSession[] @relation("SupportUser")
   expenses        Expense[]        @relation("ExpensesCreatedBy")
   payments        Payment[]
+  sessions        Session[]
+  disabledAt      DateTime?
 }
 
 model TelegramUpdate {
@@ -64,27 +66,35 @@ model AnalyticsEvent {
 }
 
 model Group {
-  id        String       @id @default(uuid())
-  name      String
-  schedule  ScheduleType
-  startTime String
-  endTime   String
-  month     Int          @default(1)
-  status    GroupStatus  @default(NEW)
-  programId String
-  teacherId String?
-  createdAt DateTime     @default(now())
-  program   Program      @relation(fields: [programId], references: [id])
-  teacher   User?        @relation("TeacherGroups", fields: [teacherId], references: [id])
-  reports   Report[]
-  students  Student[]
-  payments  Payment[]
+  id         String       @id @default(uuid())
+  name       String
+  schedule   ScheduleType
+  startTime  String
+  endTime    String
+  month      Int          @default(1)
+  status     GroupStatus  @default(NEW)
+  programId  String
+  teacherId  String?
+  createdAt  DateTime     @default(now())
+  program    Program      @relation(fields: [programId], references: [id])
+  teacher    User?        @relation("TeacherGroups", fields: [teacherId], references: [id])
+  reports    Report[]
+  students   Student[]
+  payments   Payment[]
+  archivedAt DateTime?
+  monthlyFee Int          @default(750000)
+
+  @@index([teacherId, schedule, archivedAt])
 }
 
 model Student {
-  id                   String               @id @default(uuid())
+  id                   String                @id @default(uuid())
   name                 String
-  createdAt            DateTime             @default(now())
+  createdAt            DateTime              @default(now())
+  phone                String?
+  note                 String?
+  archivedAt           DateTime?
+  leads                Lead[]
   groups               Group[]
   parents              Parent[]
   payments             Payment[]
@@ -93,17 +103,19 @@ model Student {
   supportSessions      SupportSession[]
   telegramDeliveries   TelegramDelivery[]
   telegramPendingLinks TelegramPendingLink[]
+
+  @@index([archivedAt, createdAt])
 }
 
 model Parent {
-  id                   String               @id @default(uuid())
+  id                   String                @id @default(uuid())
   name                 String
   phone                String
   telegramId           BigInt?
-  createdAt            DateTime             @default(now())
+  createdAt            DateTime              @default(now())
   studentId            String
-  student              Student              @relation(fields: [studentId], references: [id])
-  invites              ParentInvite[]       @relation("InvitesUsedByParent")
+  student              Student               @relation(fields: [studentId], references: [id])
+  invites              ParentInvite[]        @relation("InvitesUsedByParent")
   telegramDeliveries   TelegramDelivery[]
   telegramPendingLinks TelegramPendingLink[]
 
@@ -147,7 +159,8 @@ model Report {
   student    Student          @relation(fields: [studentId], references: [id])
   teacher    User             @relation("TeacherReports", fields: [teacherId], references: [id])
 
-  @@unique([studentId, dateKey])
+  @@unique([studentId, groupId, dateKey])
+  @@index([dateKey, attendance])
   @@index([groupId, dateKey])
 }
 
@@ -201,17 +214,18 @@ model TelegramDelivery {
 }
 
 model Payment {
-  id        String        @id @default(uuid())
-  studentId String
-  student   Student       @relation(fields: [studentId], references: [id])
-  teacherId String?
-  teacher   User?         @relation(fields: [teacherId], references: [id])
-  groupId   String?
-  group     Group?        @relation(fields: [groupId], references: [id])
+  id              String        @id @default(uuid())
+  studentId       String
+  student         Student       @relation(fields: [studentId], references: [id])
+  teacherId       String?
+  teacher         User?         @relation(fields: [teacherId], references: [id])
+  groupId         String?
+  group           Group?        @relation(fields: [groupId], references: [id])
   periodStart     DateTime
   periodEnd       DateTime
   classesIncluded Int           @default(12)
   amount          Int
+  paidAmount      Int           @default(0)
   baseAmount      Int           @default(0)
   discountPct     Int           @default(0)
   bonus           Int           @default(0)
@@ -222,22 +236,96 @@ model Payment {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  @@unique([studentId, periodStart])
+  @@unique([studentId, groupId, periodStart])
   @@index([teacherId, periodStart])
   @@index([studentId, periodStart])
   @@index([periodStart, periodEnd])
 }
 
+model Session {
+  id        String   @id @default(uuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+model LoginAttempt {
+  key       String   @id
+  count     Int      @default(1)
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  actorName String
+  action    String
+  entity    String
+  entityId  String
+  summary   String
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId, createdAt])
+  @@index([createdAt])
+}
+
+model LeadActivity {
+  id        String   @id @default(uuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id])
+  actorName String
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+model LeadForm {
+  id      String @id
+  name    String
+  program String
+}
+
+model IntegrationError {
+  id         String    @id @default(uuid())
+  service    String
+  message    String
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([resolvedAt, createdAt])
+}
+
 model Lead {
-  id        String     @id @default(uuid())
-  name      String
-  phone     String?
-  source    String?
-  program   String?
-  status    LeadStatus @default(NEW)
-  note      String?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id         String         @id @default(uuid())
+  name       String
+  phone      String?
+  source     String?
+  program    String?
+  ownerId    String?
+  followUpAt DateTime?
+  trialAt    DateTime?
+  lossReason String?
+  archivedAt DateTime?
+  studentId  String?
+  student    Student?       @relation(fields: [studentId], references: [id])
+  activities LeadActivity[]
+  status     LeadStatus     @default(NEW)
+  note       String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([status, createdAt])
+  @@index([source, createdAt])
+  @@index([ownerId, followUpAt])
+  @@index([studentId])
 }
 
 model Expense {

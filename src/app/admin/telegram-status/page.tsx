@@ -1,228 +1,274 @@
+import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { fmtDate, pageNumber, textField } from "@/lib/format";
+import { ActionForm } from "@/components/ActionForm";
+import { saveLeadForm } from "../leads/actions";
+import { deliverOne } from "@/lib/telegramDelivery";
+import { revalidatePath } from "next/cache";
+import Pagination from "@/components/Pagination";
 import Link from "next/link";
-
-export const revalidate = 30;
-
-type SP = Promise<{ q?: string; status?: string }>;
-
-function fmtDate(d: Date | null | undefined) {
-  if (!d) return "—";
-  return new Intl.DateTimeFormat("ru-RU", {
-    dateStyle: "short",
-    timeStyle: "short",
-    timeZone: "Asia/Tashkent",
-  }).format(d);
-}
-
-export default async function TelegramStatusPage(props: { searchParams: SP }) {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get("userId")?.value;
-  if (!userId) redirect("/login");
-
-  const admin = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { role: true },
+async function retry(f: FormData) {
+  "use server";
+  const actor = await requireRole("ADMIN", "DIRECTOR");
+  const id = textField(f, "id");
+  const row = await prisma.telegramDelivery.findUniqueOrThrow({
+    where: { id },
   });
-  if (!admin) redirect("/login");
-  if (admin.role !== "ADMIN") redirect(`/${admin.role.toLowerCase()}`);
-
-  const { q: rawQ, status: rawStatus } = await props.searchParams;
-  const q = (rawQ ?? "").trim();
-  const statusFilter = (rawStatus ?? "all").toLowerCase();
-
-  const parents = await prisma.parent.findMany({
-    include: {
-      student: {
-        select: {
-          id: true,
-          name: true,
-          groups: { select: { name: true }, take: 1 },
-        },
-      },
-      telegramDeliveries: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: {
-          status: true,
-          createdAt: true,
-          lastAttemptAt: true,
-          sentAt: true,
-          error: true,
-        },
-      },
+  if (row.attemptCount >= 10)
+    throw new Error(
+      "Достигнут предел попыток. Проверьте подключение родителя.",
+    );
+  if (row.nextRetryAt && row.nextRetryAt > new Date())
+    throw new Error(
+      "Следующая попытка доступна после " + fmtDate(row.nextRetryAt),
+    );
+  await prisma.auditLog.create({
+    data: {
+      actorId: actor.id,
+      actorName: actor.name,
+      action: "RETRY",
+      entity: "TelegramDelivery",
+      entityId: id,
+      summary: "Повторная отправка сообщения по запросу сотрудника",
     },
-    orderBy: { createdAt: "desc" },
   });
-
-  const rows = parents
-    .map((p) => {
-      const last = p.telegramDeliveries[0] ?? null;
-      const isLinked = p.telegramId !== null;
-      return {
-        id: p.id,
-        parentName: p.name,
-        phone: p.phone,
-        telegramId: p.telegramId ? p.telegramId.toString() : null,
-        linked: isLinked,
-        studentName: p.student.name,
-        groupName: p.student.groups[0]?.name ?? "—",
-        deliveryStatus: last?.status ?? null,
-        deliveryAt: last?.sentAt ?? last?.lastAttemptAt ?? last?.createdAt ?? null,
-        error: last?.error ?? null,
-      };
-    })
-    .filter((row) => {
-      if (statusFilter === "linked" && !row.linked) return false;
-      if (statusFilter === "unlinked" && row.linked) return false;
-      if (!q) return true;
-      return [row.parentName, row.phone, row.studentName, row.groupName, row.telegramId ?? ""]
-        .join(" ")
-        .toLowerCase()
-        .includes(q.toLowerCase());
-    });
-
-  const stats = {
-    total: rows.length,
-    linked: rows.filter((r) => r.linked).length,
-    unlinked: rows.filter((r) => !r.linked).length,
-    failed: rows.filter((r) => r.deliveryStatus === "FAILED").length,
-  };
-
-  return (
-    <div className="space-y-8 max-w-6xl">
-
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Telegram Status</h1>
-        <p className="text-sm text-gray-500 mt-1">Parent link status and delivery history</p>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Parents" value={stats.total} />
-        <StatCard label="Linked" value={stats.linked} color="green" />
-        <StatCard label="Not Linked" value={stats.unlinked} color="gray" />
-        <StatCard label="Failed Delivery" value={stats.failed} color={stats.failed > 0 ? "red" : "gray"} />
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-        <form className="flex flex-wrap gap-3">
-          <input
-            type="text"
-            name="q"
-            defaultValue={q}
-            placeholder="Search: parent / student / phone / group"
-            className="flex-1 h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[220px]"
-          />
-          <select
-            name="status"
-            defaultValue={statusFilter}
-            className="h-11 border border-gray-200 rounded-xl px-4 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          >
-            <option value="all">All</option>
-            <option value="linked">Linked only</option>
-            <option value="unlinked">Not linked only</option>
-          </select>
-          <button
-            type="submit"
-            className="h-11 px-6 rounded-xl bg-gray-900 text-white text-sm font-semibold hover:bg-gray-700 transition"
-          >
-            Apply
-          </button>
-          <Link
-            href="/admin/telegram-status"
-            className="h-11 px-4 flex items-center rounded-xl border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 transition"
-          >
-            Reset
-          </Link>
-        </form>
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <p className="font-semibold text-gray-900">
-            {rows.length} parent{rows.length !== 1 ? "s" : ""}
-          </p>
-        </div>
-
-        {rows.length === 0 ? (
-          <div className="px-6 py-8 text-sm text-gray-400">Nothing found.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm" style={{ minWidth: "900px" }}>
-              <thead className="bg-gray-50 border-b border-gray-100">
-                <tr className="text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                  <th className="px-6 py-3">Parent</th>
-                  <th className="px-6 py-3">Phone</th>
-                  <th className="px-6 py-3">Student</th>
-                  <th className="px-6 py-3">Group</th>
-                  <th className="px-6 py-3">Link</th>
-                  <th className="px-6 py-3">Telegram ID</th>
-                  <th className="px-6 py-3">Last Delivery</th>
-                  <th className="px-6 py-3">When</th>
-                  <th className="px-6 py-3">Error</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {rows.map((row) => (
-                  <tr key={row.id} className="hover:bg-gray-50 align-top">
-                    <td className="px-6 py-3 font-medium text-gray-900">{row.parentName}</td>
-                    <td className="px-6 py-3 text-gray-600">{row.phone}</td>
-                    <td className="px-6 py-3 text-gray-600">{row.studentName}</td>
-                    <td className="px-6 py-3 text-gray-600">{row.groupName}</td>
-                    <td className="px-6 py-3">
-                      <span className={`text-xs font-semibold px-2 py-1 rounded-full ${row.linked ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}`}>
-                        {row.linked ? "✓ Linked" : "Not linked"}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3 text-gray-600 font-mono text-xs">{row.telegramId ?? "—"}</td>
-                    <td className="px-6 py-3">
-                      {row.deliveryStatus ? (
-                        <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
-                          row.deliveryStatus === "SENT" ? "bg-green-100 text-green-700" :
-                          row.deliveryStatus === "FAILED" ? "bg-red-100 text-red-700" :
-                          "bg-yellow-100 text-yellow-700"
-                        }`}>
-                          {row.deliveryStatus}
-                        </span>
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-3 text-gray-500 text-xs">{fmtDate(row.deliveryAt)}</td>
-                    <td className="px-6 py-3 text-gray-500 text-xs max-w-[200px] break-words">
-                      {row.error ?? "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  const result = await deliverOne(id);
+  revalidatePath("/admin/telegram-status");
+  if (result.status === "FAILED")
+    throw new Error("Telegram отклонил отправку. Подробности в журнале.");
 }
-
-function StatCard({ label, value, color = "gray" }: { label: string; value: number; color?: "green" | "red" | "gray" }) {
-  const styles = {
-    green: "bg-green-50 border-green-100",
-    red: "bg-red-50 border-red-100",
-    gray: "bg-white border-gray-100",
-  };
-  const textStyles = {
-    green: "text-green-700",
-    red: "text-red-700",
-    gray: "text-gray-900",
-  };
+async function resolve(f: FormData) {
+  "use server";
+  await requireRole("ADMIN", "DIRECTOR");
+  await prisma.integrationError.update({
+    where: { id: textField(f, "id") },
+    data: { resolvedAt: new Date() },
+  });
+  revalidatePath("/admin/telegram-status");
+}
+export default async function Integrations({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string; status?: string }>;
+}) {
+  const user = await requireRole("ADMIN", "DIRECTOR");
+  const sp = await searchParams;
+  const page = pageNumber(sp.page);
+  const status = ["FAILED", "PENDING", "SENT"].includes(sp.status || "")
+    ? (sp.status as "FAILED" | "PENDING" | "SENT")
+    : undefined;
+  const where = status ? { status } : {};
+  const [deliveries, total, stats, linked, parents, errors, forms] =
+    await Promise.all([
+      prisma.telegramDelivery.findMany({
+        where,
+        take: 30,
+        skip: (page - 1) * 30,
+        orderBy: { createdAt: "desc" },
+        include: {
+          student: { select: { name: true } },
+          parent: { select: { name: true } },
+        },
+      }),
+      prisma.telegramDelivery.count({ where }),
+      prisma.telegramDelivery.groupBy({
+        by: ["status"],
+        _count: { _all: true },
+      }),
+      prisma.parent.count({ where: { telegramId: { not: null } } }),
+      prisma.parent.count(),
+      prisma.integrationError.findMany({
+        where: { resolvedAt: null },
+        take: 30,
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.leadForm.findMany({ orderBy: { name: "asc" } }),
+    ]);
   return (
-    <div className={`rounded-2xl border p-5 shadow-sm ${styles[color]}`}>
-      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{label}</p>
-      <p className={`text-2xl font-bold mt-1 ${textStyles[color]}`}>{value}</p>
-    </div>
+    <>
+      <header className="page-header">
+        <div>
+          <div className="eyebrow">СВЯЗЬ И ДАННЫЕ</div>
+          <h1>Интеграции</h1>
+          <p>Подключения, журнал доставки и формы рекламы.</p>
+        </div>
+      </header>
+      <div className="metric-grid">
+        <div className="metric">
+          <span className="metric-label">Родители в Telegram</span>
+          <strong>
+            {linked} / {parents}
+          </strong>
+          <small>Подключение — в карточке ученика</small>
+        </div>
+        {(["SENT", "FAILED", "PENDING"] as const).map((s) => (
+          <Link
+            href={"/admin/telegram-status?status=" + s}
+            className="metric"
+            key={s}
+          >
+            <span className="metric-label">
+              {
+                {
+                  SENT: "Доставлено",
+                  FAILED: "Ошибки доставки",
+                  PENDING: "Ожидают отправки",
+                }[s]
+              }
+            </span>
+            <strong>
+              {stats.find((x) => x.status === s)?._count._all || 0}
+            </strong>
+            <small>Открыть журнал →</small>
+          </Link>
+        ))}
+      </div>
+      <div className="notice">
+        Instagram → CRM:{" "}
+        {process.env.WEBHOOK_SECRET
+          ? "приём заявок настроен"
+          : "нужна настройка ключа"}
+        . Обратные события CRM → Make:{" "}
+        {process.env.MAKE_WEBHOOK_URL ? "настроены" : "не настроены"}. Повторная
+        отправка Telegram запускается вручную из журнала.
+      </div>
+      {errors.length > 0 && (
+        <section className="panel" style={{ marginBottom: 24 }}>
+          <h2>Ошибки интеграций</h2>
+          {errors.map((e) => (
+            <div className="list-row" key={e.id}>
+              <div>
+                <strong>{e.service}</strong>
+                <p>{e.message}</p>
+                <small>{fmtDate(e.createdAt)}</small>
+              </div>
+              <ActionForm action={resolve}>
+                <input name="id" type="hidden" value={e.id} />
+                <button className="btn secondary">Отметить решённой</button>
+              </ActionForm>
+            </div>
+          ))}
+        </section>
+      )}
+      <form className="filters">
+        <select
+          name="status"
+          defaultValue={status || ""}
+          aria-label="Статус доставки"
+        >
+          <option value="">Все доставки</option>
+          <option value="FAILED">Ошибки</option>
+          <option value="PENDING">Ожидают</option>
+          <option value="SENT">Доставлено</option>
+        </select>
+        <button className="btn">Показать</button>
+      </form>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Ученик / родитель</th>
+              <th>Дата</th>
+              <th>Статус</th>
+              <th>Ошибка</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {deliveries.map((d) => (
+              <tr key={d.id}>
+                <td>
+                  <Link href={"/admin/students/" + d.studentId}>
+                    <strong>{d.student.name}</strong>
+                  </Link>
+                  <p className="muted">{d.parent.name}</p>
+                </td>
+                <td>{fmtDate(d.createdAt)}</td>
+                <td>
+                  <span
+                    className={
+                      "badge " +
+                      (d.status === "SENT"
+                        ? "green"
+                        : d.status === "FAILED"
+                          ? "red"
+                          : "blue")
+                    }
+                  >
+                    {
+                      {
+                        SENT: "Доставлено",
+                        FAILED: "Ошибка",
+                        PENDING: "В очереди",
+                      }[d.status]
+                    }
+                  </span>
+                  <p className="muted">Попыток: {d.attemptCount}</p>
+                </td>
+                <td style={{ maxWidth: 250, overflowWrap: "anywhere" }}>
+                  {d.error || "—"}
+                </td>
+                <td>
+                  {d.status !== "SENT" && (
+                    <ActionForm action={retry}>
+                      <input name="id" type="hidden" value={d.id} />
+                      <button className="btn secondary">
+                        Повторить отправку
+                      </button>
+                    </ActionForm>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!deliveries.length && <p className="empty">Записей нет</p>}
+      </div>
+      <Pagination
+        page={page}
+        total={total}
+        base="/admin/telegram-status"
+        params={{ status: status || "" }}
+      />
+      {user.role === "DIRECTOR" && (
+        <section className="panel" style={{ marginTop: 24 }}>
+          <h2 className="panel-title">Курсы по формам Instagram</h2>
+          <p className="muted" style={{ marginBottom: 20 }}>
+            Для новых форм укажите ID из Meta. Неизвестные формы сохраняются как
+            лиды без курса.
+          </p>
+          <div className="stack">
+            {[...forms, { id: "", name: "", program: "" }].map((f, i) => (
+              <ActionForm
+                key={f.id || i}
+                action={saveLeadForm}
+                className="form-grid"
+              >
+                <label className="field">
+                  <span>ID формы</span>
+                  <input
+                    name="id"
+                    defaultValue={f.id}
+                    required
+                    readOnly={!!f.id}
+                  />
+                </label>
+                <label className="field">
+                  <span>Название</span>
+                  <input name="name" defaultValue={f.name} required />
+                </label>
+                <label className="field">
+                  <span>Курс</span>
+                  <input name="program" defaultValue={f.program} required />
+                </label>
+                <button className="btn secondary">
+                  {f.id ? "Сохранить" : "Добавить форму"}
+                </button>
+              </ActionForm>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
   );
 }

@@ -1,7 +1,9 @@
 import "./globals.css";
 export const metadata = {
-  title: "EIT - IT Tracking of Students",
-  description: "EIT Internal System",
+  title: "EIT OS — CRM",
+  description: "Рабочее пространство EIT",
+  icons: { icon: "/brand/eit-favicon.svg" },
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({
@@ -10,7 +12,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="ru">
       <body>{children}</body>
     </html>
   );

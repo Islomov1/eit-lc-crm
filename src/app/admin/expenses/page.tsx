@@ -1,327 +1,230 @@
+import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-
-export const revalidate = 0;
-
-const DEFAULT_CATEGORIES = [
-  "Аренда / Ijara",
-  "Зарплата / Maosh",
-  "Коммунальные / Kommunal",
-  "Маркетинг / Marketing",
-  "Оборудование / Jihozlar",
-  "Канцелярия / Kantselyariya",
-  "Интернет / Internet",
-  "Транспорт / Transport",
-  "Ремонт / Ta'mirlash",
-  "Другое / Boshqa",
-];
-
-/* ── actions ─────────────────────────────────────────────── */
-
-async function createExpense(formData: FormData) {
+import {
+  dateKey,
+  monthWindow,
+  money,
+  fmtDate,
+  textField,
+  pageNumber,
+} from "@/lib/format";
+import { ActionForm } from "@/components/ActionForm";
+import Pagination from "@/components/Pagination";
+async function saveExpense(f: FormData) {
   "use server";
-  const cookieStore = await cookies();
-  const userId = cookieStore.get("userId")?.value;
-  if (!userId) return;
-
-  const amount = Number(formData.get("amount"));
-  const category = formData.get("category")?.toString().trim();
-  const description = formData.get("description")?.toString().trim();
-  const date = formData.get("date")?.toString();
-
-  if (!amount || !category) return;
-
-  await prisma.expense.create({
-    data: {
-      amount: Math.trunc(amount),
-      category,
-      description: description || null,
-      date: date ? new Date(date) : new Date(),
-      createdById: userId,
-    },
+  const actor = await requireRole("DIRECTOR");
+  const id = textField(f, "id");
+  const amount = Number(f.get("amount"));
+  const category = textField(f, "category", 100);
+  const description = textField(f, "description", 2000);
+  const rawDate = textField(f, "date");
+  const date = new Date(rawDate + "T12:00:00+05:00");
+  if (
+    !Number.isSafeInteger(amount) ||
+    amount <= 0 ||
+    amount > 1e9 ||
+    !category ||
+    !Number.isFinite(+date)
+  )
+    throw new Error("Проверьте сумму, категорию и дату");
+  await prisma.$transaction(async (tx) => {
+    const old = id
+      ? await tx.expense.findUniqueOrThrow({ where: { id } })
+      : null;
+    const data = { amount, category, description: description || null, date };
+    const row = id
+      ? await tx.expense.update({ where: { id }, data })
+      : await tx.expense.create({ data: { ...data, createdById: actor.id } });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.id,
+        actorName: actor.name,
+        action: id ? "UPDATE" : "CREATE",
+        entity: "Expense",
+        entityId: row.id,
+        summary: `${category}: ${old?.amount || 0} → ${amount} сум · ${description}`,
+      },
+    });
   });
-
+  revalidatePath("/admin/expenses");
+  revalidatePath("/admin/analytics");
+}
+async function deleteExpense(f: FormData) {
+  "use server";
+  const actor = await requireRole("DIRECTOR");
+  if (f.get("confirm") !== "yes")
+    throw new Error("Подтвердите удаление ошибочной записи");
+  const id = textField(f, "id");
+  await prisma.$transaction(async (tx) => {
+    const row = await tx.expense.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        actorId: actor.id,
+        actorName: actor.name,
+        action: "DELETE",
+        entity: "Expense",
+        entityId: id,
+        summary: `Удалён расход ${row.amount} сум · ${row.category} · ${row.date.toISOString()} · ${row.description || ""}`,
+      },
+    });
+  });
   revalidatePath("/admin/expenses");
 }
-
-async function deleteExpense(formData: FormData) {
-  "use server";
-  const id = formData.get("id")?.toString();
-  if (!id) return;
-  await prisma.expense.delete({ where: { id } });
-  revalidatePath("/admin/expenses");
-}
-
-/* ── helpers ─────────────────────────────────────────────── */
-
-function fmt(n: number) {
-  return new Intl.NumberFormat("ru-RU").format(n);
-}
-
-function fmtDate(d: Date) {
-  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", year: "numeric" }).format(d);
-}
-
-function currentYYYYMM() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-type SP = { month?: string; category?: string };
-
-/* ── page ────────────────────────────────────────────────── */
-
-export default async function ExpensesPage(props: { searchParams?: Promise<SP> }) {
-  const cookieStore = await cookies();
-  const userId = cookieStore.get("userId")?.value;
-  if (!userId) redirect("/login");
-
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
-  if (!user || user.role !== "DIRECTOR") redirect("/admin");
-
-  const sp = props.searchParams ? await props.searchParams : {};
-  const month = sp.month || currentYYYYMM();
-  const categoryFilter = sp.category || "";
-
-  const [y, m] = month.split("-").map(Number);
-  const monthStart = new Date(y, m - 1, 1);
-  const monthEnd = new Date(y, m, 1);
-
-  // All expenses for selected month
-  const expenses = await prisma.expense.findMany({
-    where: {
-      date: { gte: monthStart, lt: monthEnd },
-      ...(categoryFilter ? { category: categoryFilter } : {}),
-    },
-    orderBy: { date: "desc" },
-  });
-
-  // All existing categories (custom + default)
-  const existingCategories = await prisma.expense.findMany({
-    select: { category: true },
-    distinct: ["category"],
-  });
-  const allCategories = Array.from(
-    new Set([...DEFAULT_CATEGORIES, ...existingCategories.map((e) => e.category)])
-  ).sort();
-
-  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-
-  // By category breakdown
-  const byCategory = expenses.reduce((acc, e) => {
-    acc[e.category] = (acc[e.category] ?? 0) + e.amount;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const today = new Date().toISOString().slice(0, 10);
-
-  return (
-    <div className="max-w-4xl mx-auto space-y-8">
-
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
-          <p className="text-sm text-gray-500 mt-1">Director view · {month}</p>
-        </div>
-      </div>
-
-      {/* Summary */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Total Expenses</p>
-          <p className="text-2xl font-bold text-red-600 mt-1">{fmt(totalExpenses)} UZS</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Transactions</p>
-          <p className="text-2xl font-bold text-gray-900 mt-1">{expenses.length}</p>
-        </div>
-      </div>
-
-      {/* By category */}
-      {Object.keys(byCategory).length > 0 && (
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-3">
-          <h2 className="font-semibold text-gray-900">By Category</h2>
-          <div className="space-y-2">
-            {Object.entries(byCategory)
-              .sort(([, a], [, b]) => b - a)
-              .map(([cat, total]) => {
-                const pct = totalExpenses > 0 ? Math.round((total / totalExpenses) * 100) : 0;
-                return (
-                  <div key={cat}>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-gray-700">{cat}</span>
-                      <span className="font-semibold text-gray-900">{fmt(total)} <span className="text-gray-400 font-normal">({pct}%)</span></span>
-                    </div>
-                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-red-400 rounded-full" style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-        <form method="get" className="flex flex-wrap gap-3">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Month</label>
-            <input
-              name="month"
-              type="month"
-              defaultValue={month}
-              className="h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Category</label>
-            <select
-              name="category"
-              defaultValue={categoryFilter}
-              className="h-10 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-            >
-              <option value="">All categories</option>
-              {allCategories.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <div className="self-end">
-            <button type="submit" className="h-10 px-5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">
-              Apply
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Add expense */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-4">
-        <h2 className="font-semibold text-gray-900">Add Expense</h2>
-        <form action={createExpense} className="grid grid-cols-2 md:grid-cols-4 gap-3">
-
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Amount (UZS)</label>
-            <input
-              name="amount"
-              type="number"
-              min={0}
-              step={1000}
-              placeholder="500 000"
-              required
-              className="w-full h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Category</label>
-            <select
-              name="category"
-              required
-              defaultValue=""
-              className="w-full h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-            >
-              <option value="" disabled>Select...</option>
-              {allCategories.map((c) => <option key={c} value={c}>{c}</option>)}
-              <option value="__custom__">+ Custom category</option>
-            </select>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Date</label>
-            <input
-              name="date"
-              type="date"
-              defaultValue={today}
-              required
-              className="w-full h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Description</label>
-            <input
-              name="description"
-              placeholder="Optional note..."
-              className="w-full h-11 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-            />
-          </div>
-
-          <button
-            type="submit"
-            className="col-span-2 md:col-span-4 h-11 bg-gray-900 text-white rounded-xl font-semibold text-sm hover:bg-gray-700 transition"
-          >
-            Add Expense
-          </button>
-        </form>
-
-        {/* Custom category note */}
-        <p className="text-xs text-gray-400">
-          Выбери "+ Custom category" и введи название вручную в поле Description — или добавь новую категорию через поле ниже.
-        </p>
-
-        {/* Quick add custom category */}
-        <form action={createExpense} className="flex gap-3 pt-2 border-t border-gray-100">
+export default async function ExpensesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string; page?: string }>;
+}) {
+  await requireRole("DIRECTOR");
+  const sp = await searchParams;
+  const { month, start, end } = monthWindow(sp.month || dateKey().slice(0, 7));
+  const page = pageNumber(sp.page);
+  const where = { date: { gte: start, lt: end } };
+  const [rows, summary, categories] = await Promise.all([
+    prisma.expense.findMany({
+      where,
+      take: 30,
+      skip: (page - 1) * 30,
+      orderBy: { date: "desc" },
+    }),
+    prisma.expense.aggregate({ where, _sum: { amount: true }, _count: true }),
+    prisma.expense.groupBy({
+      by: ["category"],
+      where,
+      _sum: { amount: true },
+      orderBy: { _sum: { amount: "desc" } },
+    }),
+  ]);
+  function fields(e?: (typeof rows)[number]) {
+    return (
+      <>
+        <input type="hidden" name="id" value={e?.id || ""} />
+        <label className="field">
+          <span>Сумма, сум</span>
+          <input
+            name="amount"
+            type="number"
+            min={1}
+            max={1000000000}
+            defaultValue={e?.amount}
+            required
+          />
+        </label>
+        <label className="field">
+          <span>Категория</span>
           <input
             name="category"
-            placeholder="New custom category name..."
+            list="categories"
+            defaultValue={e?.category}
             required
-            className="flex-1 h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
           />
-          <input type="hidden" name="amount" value="0" />
-          <input type="hidden" name="date" value={today} />
-          <button
-            type="submit"
-            className="h-10 px-5 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 transition"
-          >
-            + Add Category
-          </button>
-        </form>
-      </div>
-
-      {/* Expenses list */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-900">Transactions</h2>
-          <span className="text-xs text-gray-400">{expenses.length} records · {fmt(totalExpenses)} UZS</span>
+        </label>
+        <label className="field">
+          <span>Дата</span>
+          <input
+            name="date"
+            type="date"
+            defaultValue={e ? dateKey(e.date) : dateKey()}
+            required
+          />
+        </label>
+        <label className="field">
+          <span>Описание</span>
+          <input name="description" defaultValue={e?.description || ""} />
+        </label>
+        <button className="btn">Сохранить расход</button>
+      </>
+    );
+  }
+  return (
+    <>
+      <header className="page-header">
+        <div>
+          <div className="eyebrow">ФИНАНСЫ</div>
+          <h1>Расходы</h1>
+          <p>
+            {summary._count} записей · {money(summary._sum.amount || 0)}
+          </p>
         </div>
-
-        {expenses.length === 0 ? (
-          <div className="px-6 py-8 text-sm text-gray-400">No expenses for this period.</div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {expenses.map((e) => (
-              <div key={e.id} className="px-6 py-4 flex items-center justify-between gap-4 hover:bg-gray-50">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-semibold px-2 py-1 rounded-full bg-red-50 text-red-600">
-                      {e.category}
-                    </span>
-                    <span className="text-xs text-gray-400">{fmtDate(e.date)}</span>
-                  </div>
-                  {e.description && (
-                    <p className="text-sm text-gray-600 mt-1 truncate">{e.description}</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-4 flex-shrink-0">
-                  <span className="font-bold text-gray-900">{fmt(e.amount)} UZS</span>
-                  <form action={deleteExpense}>
-                    <input type="hidden" name="id" value={e.id} />
-                    <button
-                      type="submit"
-                      className="h-8 px-3 rounded-lg bg-red-50 text-red-500 text-xs font-semibold hover:bg-red-100 transition"
-                    >
-                      Delete
-                    </button>
-                  </form>
-                </div>
-              </div>
-            ))}
+        <form className="filters">
+          <input
+            type="month"
+            name="month"
+            defaultValue={month}
+            aria-label="Месяц"
+          />
+          <button className="btn">Показать</button>
+        </form>
+      </header>
+      <datalist id="categories">
+        {[
+          ...new Set([
+            "Аренда",
+            "Зарплата",
+            "Коммунальные",
+            "Маркетинг",
+            "Оборудование",
+            "Интернет",
+            "Другое",
+            ...categories.map((c) => c.category),
+          ]),
+        ].map((c) => (
+          <option key={c}>{c}</option>
+        ))}
+      </datalist>
+      <div className="metric-grid">
+        {categories.map((c) => (
+          <div className="metric" key={c.category}>
+            <span className="metric-label">{c.category}</span>
+            <strong style={{ fontSize: 23 }}>
+              {money(c._sum.amount || 0)}
+            </strong>
           </div>
-        )}
+        ))}
       </div>
-
-    </div>
+      <details className="panel" style={{ marginBottom: 24 }}>
+        <summary className="details-summary">
+          <h2>Добавить расход</h2>
+        </summary>
+        <ActionForm action={saveExpense} className="form-grid">
+          {fields()}
+        </ActionForm>
+      </details>
+      <div className="stack">
+        {rows.map((e) => (
+          <details className="panel" key={e.id}>
+            <summary className="details-summary">
+              <div>
+                <strong>{e.category}</strong>
+                <p className="muted">
+                  {fmtDate(e.date)} · {e.description}
+                </p>
+              </div>
+              <strong>{money(e.amount)}</strong>
+            </summary>
+            <ActionForm action={saveExpense} className="form-grid">
+              {fields(e)}
+            </ActionForm>
+            <ActionForm action={deleteExpense} className="filters">
+              <input name="id" type="hidden" value={e.id} />
+              <label style={{ marginTop: 20 }}>
+                <input name="confirm" type="checkbox" value="yes" required />{" "}
+                Это ошибочная запись
+              </label>
+              <button className="btn danger" style={{ marginTop: 12 }}>
+                Удалить запись
+              </button>
+            </ActionForm>
+          </details>
+        ))}
+      </div>
+      <Pagination
+        page={page}
+        total={summary._count}
+        base="/admin/expenses"
+        params={{ month }}
+      />
+    </>
   );
 }

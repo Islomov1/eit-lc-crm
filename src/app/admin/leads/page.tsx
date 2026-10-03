@@ -1,313 +1,254 @@
+import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { revalidatePath } from "next/cache";
-import { LeadStatus } from "@prisma/client";
+import { Prisma, LeadStatus } from "@prisma/client";
 import Link from "next/link";
-
-export const revalidate = 30;
-
-/* ================= SERVER ACTIONS ================= */
-
-async function createLead(formData: FormData) {
-  "use server";
-  const name = formData.get("name")?.toString().trim();
-  const phone = formData.get("phone")?.toString().trim();
-  const source = formData.get("source")?.toString();
-  const program = formData.get("program")?.toString();
-  const note = formData.get("note")?.toString().trim();
-  if (!name) return;
-  await prisma.lead.create({
-    data: {
-      name,
-      phone: phone || null,
-      source: source || "manual",
-      program: program || null,
-      note: note || null,
-      status: "NEW",
-    },
-  });
-  revalidatePath("/admin/leads");
-}
-
-async function updateLead(formData: FormData) {
-  "use server";
-  const id = formData.get("id")?.toString();
-  const name = formData.get("name")?.toString().trim();
-  const phone = formData.get("phone")?.toString().trim();
-  const source = formData.get("source")?.toString();
-  const program = formData.get("program")?.toString();
-  const status = formData.get("status")?.toString() as LeadStatus;
-  const note = formData.get("note")?.toString().trim();
-  if (!id || !name) return;
-  await prisma.lead.update({
-    where: { id },
-    data: {
-      name,
-      phone: phone || null,
-      source: source || null,
-      program: program || null,
-      status,
-      note: note || null,
-    },
-  });
-  revalidatePath("/admin/leads");
-}
-
-async function deleteLead(formData: FormData) {
-  "use server";
-  const id = formData.get("id")?.toString();
-  if (!id) return;
-  await prisma.lead.delete({ where: { id } });
-  revalidatePath("/admin/leads");
-}
-
-/* ================= HELPERS ================= */
-
-const STATUS_STYLES: Record<string, string> = {
-  NEW: "bg-blue-100 text-blue-700",
-  ACTIVE: "bg-green-100 text-green-700",
-  FROZEN: "bg-gray-200 text-gray-600",
-  CONVERTED: "bg-purple-100 text-purple-700",
-  LOST: "bg-red-100 text-red-700",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  NEW: "New",
-  ACTIVE: "Active",
-  FROZEN: "Frozen",
-  CONVERTED: "Converted",
-  LOST: "Lost",
-};
-
-const SOURCES = ["manual", "instagram", "telegram", "whatsapp", "referral", "website", "other"];
-const PROGRAMS = ["IELTS", "SAT", "B2", "C1", "C2", "TOEFL", "CUSTOM"];
-const STATUSES = ["NEW", "ACTIVE", "FROZEN", "CONVERTED", "LOST"] as LeadStatus[];
-
-type SP = Record<string, string | string[] | undefined>;
-function spStr(v: string | string[] | undefined) {
-  return typeof v === "string" ? v : "";
-}
-
-function fmtDate(d: Date) {
-  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "short", year: "numeric" });
-}
-
-/* ================= PAGE ================= */
-
-export default async function LeadsPage({ searchParams }: { searchParams: Promise<SP> }) {
+import Pagination from "@/components/Pagination";
+import { ActionForm } from "@/components/ActionForm";
+import { pageNumber, fmtDate } from "@/lib/format";
+import { leadLabels, leadColors } from "@/lib/lead-labels";
+import { saveLead } from "./actions";
+export default async function LeadsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  await requireRole("ADMIN", "DIRECTOR");
   const sp = await searchParams;
-
-  const q = spStr(sp.q).trim();
-  const statusFilter = spStr(sp.status).trim() as LeadStatus | "";
-  const sourceFilter = spStr(sp.source).trim();
-
-  const [leads, counts] = await Promise.all([
+  const page = pageNumber(sp.page);
+  const q = (sp.q || "").trim();
+  const status = Object.values(LeadStatus).includes(sp.status as LeadStatus)
+    ? (sp.status as LeadStatus)
+    : undefined;
+  const archived = sp.archived === "1";
+  const now = new Date();
+  const where: Prisma.LeadWhereInput = {
+    archivedAt: archived ? { not: null } : null,
+    ...(status ? { status } : {}),
+    ...(sp.ownerId ? { ownerId: sp.ownerId } : {}),
+    ...(sp.source ? { source: sp.source } : {}),
+    ...(sp.due === "1"
+      ? {
+          followUpAt: { lte: now },
+          status: { in: ["NEW", "ACTIVE", "FROZEN"] },
+        }
+      : {}),
+    ...(q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" } },
+            { phone: { contains: q } },
+            { program: { contains: q, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+  };
+  const [leads, total, counts, owners] = await Promise.all([
     prisma.lead.findMany({
-      where: {
-        ...(statusFilter ? { status: statusFilter } : {}),
-        ...(sourceFilter ? { source: sourceFilter } : {}),
-        ...(q
-          ? {
-              OR: [
-                { name: { contains: q, mode: "insensitive" } },
-                { phone: { contains: q, mode: "insensitive" } },
-                { program: { contains: q, mode: "insensitive" } },
-                { note: { contains: q, mode: "insensitive" } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take: 300,
+      where,
+      take: 30,
+      skip: (page - 1) * 30,
+      orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     }),
+    prisma.lead.count({ where }),
     prisma.lead.groupBy({
       by: ["status"],
+      where: { archivedAt: null },
       _count: { _all: true },
     }),
+    prisma.user.findMany({
+      where: { role: { in: ["ADMIN", "DIRECTOR"] }, disabledAt: null },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
-
-  const countMap = Object.fromEntries(counts.map((c) => [c.status, c._count._all]));
-  const total = Object.values(countMap).reduce((s, n) => s + n, 0);
-
+  const ownerMap = new Map(owners.map((x) => [x.id, x.name]));
   return (
-    <div className="space-y-8 max-w-6xl">
-
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+    <>
+      <header className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Leads</h1>
-          <p className="text-sm text-gray-500 mt-1">{total} total leads</p>
+          <div className="eyebrow">ОТ ЗАЯВКИ ДО ПЕРВОГО ЗАНЯТИЯ</div>
+          <h1>Лиды</h1>
+          <p>Ответственные, контакты и следующие шаги.</p>
         </div>
-      </div>
-
-      {/* Status counters */}
-      <div className="grid grid-cols-5 gap-3">
-        {STATUSES.map((s) => (
+        <Link
+          className="btn secondary"
+          href={archived ? "/admin/leads" : "/admin/leads?archived=1"}
+        >
+          {archived ? "Все активные" : "Архив лидов"}
+        </Link>
+      </header>
+      <div className="metric-grid">
+        {Object.entries(leadLabels).map(([key, label]) => (
           <Link
-            key={s}
-            href={statusFilter === s ? "/admin/leads" : `/admin/leads?status=${s}`}
-            className={`rounded-2xl p-4 border text-center transition ${
-              statusFilter === s
-                ? "border-gray-900 bg-gray-900 text-white"
-                : "bg-white border-gray-100 hover:border-gray-300"
-            }`}
+            key={key}
+            href={"/admin/leads?status=" + key}
+            className={"metric " + (status === key ? "accent" : "")}
           >
-            <p className={`text-2xl font-bold ${statusFilter === s ? "text-white" : "text-gray-900"}`}>
-              {countMap[s] ?? 0}
-            </p>
-            <p className={`text-xs font-semibold mt-1 ${statusFilter === s ? "text-gray-300" : "text-gray-500"}`}>
-              {STATUS_LABELS[s]}
-            </p>
+            <span className="metric-label">{label}</span>
+            <strong>
+              {counts.find((c) => c.status === key)?._count._all || 0}
+            </strong>
+            <small>Открыть список →</small>
           </Link>
         ))}
       </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-        <form className="flex flex-wrap gap-3">
-          <input
-            name="q"
-            defaultValue={q}
-            placeholder="Search name / phone / program..."
-            className="flex-1 h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 min-w-[200px]"
-          />
-          <select name="status" defaultValue={statusFilter} className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
-            <option value="">All statuses</option>
-            {STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
-          </select>
-          <select name="source" defaultValue={sourceFilter} className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
-            <option value="">All sources</option>
-            {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <button className="h-11 px-6 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">
-            Search
-          </button>
-          <Link href="/admin/leads" className="h-11 px-4 flex items-center border border-gray-200 rounded-xl text-sm text-gray-600 hover:bg-gray-50 transition">
-            Reset
-          </Link>
-        </form>
-      </div>
-
-      {/* Create lead */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
-        <h2 className="font-semibold text-gray-900">Add Lead Manually</h2>
-        <form action={createLead} className="grid grid-cols-6 gap-3">
-          <input name="name" placeholder="Full name" required className="col-span-2 h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-          <input name="phone" placeholder="Phone (+998...)" className="h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-          <select name="source" className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
-            {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select name="program" className="h-11 border border-gray-200 rounded-xl px-3 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
-            <option value="">No program</option>
-            {PROGRAMS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-          <input name="note" placeholder="Note (optional)" className="col-span-5 h-11 border border-gray-200 rounded-xl px-4 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900" />
-          <button className="h-11 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700 transition">
-            Add Lead
-          </button>
-        </form>
-      </div>
-
-      {/* Leads table */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <p className="font-semibold text-gray-900">
-            {leads.length} lead{leads.length !== 1 ? "s" : ""}
-            {statusFilter && <span className="ml-2 text-sm font-normal text-gray-400">· filtered by {STATUS_LABELS[statusFilter]}</span>}
-          </p>
-        </div>
-
-        {leads.length === 0 ? (
-          <div className="px-6 py-8 text-sm text-gray-400">No leads found.</div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {leads.map((lead) => (
-              <div key={lead.id} className="px-6 py-4 hover:bg-gray-50 transition">
-                <form action={updateLead} className="grid grid-cols-12 gap-3 items-center">
-                  <input type="hidden" name="id" value={lead.id} />
-
-                  {/* Name */}
-                  <div className="col-span-2">
-                    <input
-                      name="name"
-                      defaultValue={lead.name}
-                      className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-gray-900"
-                    />
-                  </div>
-
-                  {/* Phone */}
-                  <div className="col-span-2">
-                    <input
-                      name="phone"
-                      defaultValue={lead.phone ?? ""}
-                      placeholder="Phone"
-                      className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                    />
-                  </div>
-
-                  {/* Source */}
-                  <div className="col-span-1">
-                    <select name="source" defaultValue={lead.source ?? "manual"} className="w-full h-10 border border-gray-200 rounded-xl px-2 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
-                      {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-
-                  {/* Program */}
-                  <div className="col-span-1">
-                    <select name="program" defaultValue={lead.program ?? ""} className="w-full h-10 border border-gray-200 rounded-xl px-2 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
-                      <option value="">—</option>
-                      {PROGRAMS.map((p) => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </div>
-
-                  {/* Status */}
-                  <div className="col-span-2">
-                    <select name="status" defaultValue={lead.status} className="w-full h-10 border border-gray-200 rounded-xl px-2 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-900">
-                      {STATUSES.map((s) => (
-                        <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Note */}
-                  <div className="col-span-2">
-                    <input
-                      name="note"
-                      defaultValue={lead.note ?? ""}
-                      placeholder="Note..."
-                      className="w-full h-10 border border-gray-200 rounded-xl px-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                    />
-                  </div>
-
-                  {/* Date + Actions */}
-                  <div className="col-span-2 flex items-center gap-2 justify-end">
-                    <span className="text-xs text-gray-400 hidden lg:block">{fmtDate(lead.createdAt)}</span>
-                    <button type="submit" className="h-9 px-3 rounded-xl bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition">
-                      Save
-                    </button>
-                    <form action={deleteLead}>
-                      <input type="hidden" name="id" value={lead.id} />
-                      <button type="submit" className="h-9 px-3 rounded-xl bg-red-100 text-red-600 text-xs font-semibold hover:bg-red-200 transition">
-                        Del
-                      </button>
-                    </form>
-                  </div>
-
-                </form>
-
-                {/* Status badge display */}
-                <div className="mt-2 flex items-center gap-2">
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATUS_STYLES[lead.status]}`}>
-                    {STATUS_LABELS[lead.status]}
+      <form className="filters">
+        <input
+          name="q"
+          defaultValue={q}
+          aria-label="Поиск лидов"
+          placeholder="Имя, телефон или курс"
+        />
+        <input type="hidden" name="archived" value={archived ? "1" : "0"} />
+        <select name="status" defaultValue={status || ""} aria-label="Статус">
+          <option value="">Все статусы</option>
+          {Object.entries(leadLabels).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+        <select
+          name="ownerId"
+          defaultValue={sp.ownerId || ""}
+          aria-label="Ответственный"
+        >
+          <option value="">Все ответственные</option>
+          {owners.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name}
+            </option>
+          ))}
+        </select>
+        <select
+          name="source"
+          defaultValue={sp.source || ""}
+          aria-label="Источник"
+        >
+          <option value="">Все источники</option>
+          {[
+            "instagram",
+            "manual",
+            "telegram",
+            "website",
+            "referral",
+            "webhook",
+          ].map((s) => (
+            <option key={s}>{s}</option>
+          ))}
+        </select>
+        <select
+          name="due"
+          defaultValue={sp.due || ""}
+          aria-label="Срок контакта"
+        >
+          <option value="">Все сроки</option>
+          <option value="1">Пора связаться</option>
+        </select>
+        <button className="btn">Найти</button>
+        <Link className="btn secondary" href="/admin/leads">
+          Сбросить
+        </Link>
+      </form>
+      {!archived && (
+        <details className="panel" style={{ marginBottom: 24 }}>
+          <summary className="details-summary">
+            <h2>Добавить лид вручную</h2>
+          </summary>
+          <ActionForm action={saveLead} className="form-grid">
+            <label className="field">
+              <span>Имя</span>
+              <input name="name" required maxLength={255} />
+            </label>
+            <label className="field">
+              <span>Телефон</span>
+              <input name="phone" type="tel" />
+            </label>
+            <label className="field">
+              <span>Курс</span>
+              <input name="program" placeholder="IELTS / SAT / CEFR / Kids" />
+            </label>
+            <label className="field">
+              <span>Ответственный</span>
+              <select name="ownerId">
+                <option value="">Не назначен</option>
+                {owners.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field wide">
+              <span>Заметка</span>
+              <textarea name="note" rows={2} />
+            </label>
+            <button className="btn">Создать лид →</button>
+          </ActionForm>
+        </details>
+      )}
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Контакт</th>
+              <th>Курс / источник</th>
+              <th>Статус</th>
+              <th>Ответственный</th>
+              <th>Следующий контакт</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {leads.map((l) => (
+              <tr key={l.id}>
+                <td>
+                  <Link href={"/admin/leads/" + l.id}>
+                    <strong>{l.name}</strong>
+                  </Link>
+                  <p className="muted">{l.phone || "Нет телефона"}</p>
+                </td>
+                <td>
+                  {l.program || "Не указан"}
+                  <p className="muted">{l.source}</p>
+                </td>
+                <td>
+                  <span className={"badge " + leadColors[l.status]}>
+                    {leadLabels[l.status]}
                   </span>
-                  {lead.source && (
-                    <span className="text-xs text-gray-400">via {lead.source}</span>
-                  )}
-                </div>
-              </div>
+                </td>
+                <td>{ownerMap.get(l.ownerId || "") || "Не назначен"}</td>
+                <td
+                  className={
+                    l.followUpAt && l.followUpAt < now ? "error-text" : "muted"
+                  }
+                >
+                  {l.followUpAt ? fmtDate(l.followUpAt) : "Не запланирован"}
+                </td>
+                <td>
+                  <Link className="btn secondary" href={"/admin/leads/" + l.id}>
+                    Открыть →
+                  </Link>
+                </td>
+              </tr>
             ))}
-          </div>
-        )}
+          </tbody>
+        </table>
+        {!total && <div className="empty">Нет лидов по выбранным условиям</div>}
       </div>
-    </div>
+      <Pagination
+        page={page}
+        total={total}
+        base="/admin/leads"
+        params={{
+          q,
+          status: status || "",
+          ownerId: sp.ownerId || "",
+          source: sp.source || "",
+          due: sp.due || "",
+          archived: archived ? "1" : "0",
+        }}
+      />
+    </>
   );
 }
