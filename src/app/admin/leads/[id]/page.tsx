@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { ActionForm } from "@/components/ActionForm";
 import { fmtDate, localDateTime } from "@/lib/format";
-import { leadLabels, leadColors } from "@/lib/lead-labels";
+import { leadLabels, leadColors, learningFormatLabels } from "@/lib/lead-labels";
 import { saveLead, addActivity, convertLead, archiveLead } from "../actions";
 export default async function LeadPage({
   params,
@@ -49,7 +49,7 @@ export default async function LeadPage({
           </Link>
           <h1 style={{ marginTop: 12 }}>{lead.name}</h1>
           <p>
-            {lead.source || "manual"} · {fmtDate(lead.createdAt)}{" "}
+            {lead.source || "manual"} · {fmtDate(lead.createdAt)} · {learningFormatLabels[lead.learningFormat]}{" "}
             {lead.archivedAt ? "· В архиве" : ""}
           </p>
         </div>
@@ -77,6 +77,12 @@ export default async function LeadPage({
             <label className="field">
               <span>Источник</span>
               <input name="source" defaultValue={lead.source || ""} />
+            </label>
+            <label className="field">
+              <span>Формат обучения</span>
+              <select name="learningFormat" defaultValue={lead.learningFormat}>
+                {Object.entries(learningFormatLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
             </label>
             <label className="field">
               <span>Статус</span>

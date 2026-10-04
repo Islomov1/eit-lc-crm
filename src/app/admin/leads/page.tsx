@@ -1,11 +1,11 @@
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { Prisma, LeadStatus } from "@prisma/client";
+import { Prisma, LeadStatus, LearningFormat } from "@prisma/client";
 import Link from "next/link";
 import Pagination from "@/components/Pagination";
 import { ActionForm } from "@/components/ActionForm";
 import { pageNumber, fmtDate } from "@/lib/format";
-import { leadLabels, leadColors } from "@/lib/lead-labels";
+import { leadLabels, leadColors, learningFormatLabels } from "@/lib/lead-labels";
 import { saveLead } from "./actions";
 export default async function LeadsPage({
   searchParams,
@@ -20,9 +20,11 @@ export default async function LeadsPage({
     ? (sp.status as LeadStatus)
     : undefined;
   const archived = sp.archived === "1";
+  const learningFormat = Object.values(LearningFormat).includes(sp.learningFormat as LearningFormat) ? sp.learningFormat as LearningFormat : undefined;
   const now = new Date();
   const where: Prisma.LeadWhereInput = {
     archivedAt: archived ? { not: null } : null,
+    ...(learningFormat ? { learningFormat } : {}),
     ...(status ? { status } : {}),
     ...(sp.ownerId ? { ownerId: sp.ownerId } : {}),
     ...(sp.source ? { source: sp.source } : {}),
@@ -93,6 +95,10 @@ export default async function LeadsPage({
         ))}
       </div>
       <form className="filters">
+        <select name="learningFormat" defaultValue={learningFormat || ""} aria-label="Формат обучения">
+          <option value="">Все форматы</option>
+          {Object.entries(learningFormatLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
         <input
           name="q"
           defaultValue={q}
@@ -131,6 +137,7 @@ export default async function LeadsPage({
             "manual",
             "telegram",
             "website",
+            "placement",
             "referral",
             "webhook",
           ].map((s) => (
@@ -169,6 +176,12 @@ export default async function LeadsPage({
               <input name="program" placeholder="IELTS / SAT / CEFR / Kids" />
             </label>
             <label className="field">
+              <span>Формат обучения</span>
+              <select name="learningFormat" defaultValue="UNKNOWN">
+                {Object.entries(learningFormatLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </label>
+            <label className="field">
               <span>Ответственный</span>
               <select name="ownerId">
                 <option value="">Не назначен</option>
@@ -193,6 +206,7 @@ export default async function LeadsPage({
             <tr>
               <th>Контакт</th>
               <th>Курс / источник</th>
+              <th>Формат обучения</th>
               <th>Статус</th>
               <th>Ответственный</th>
               <th>Следующий контакт</th>
@@ -207,11 +221,13 @@ export default async function LeadsPage({
                     <strong>{l.name}</strong>
                   </Link>
                   <p className="muted">{l.phone || "Нет телефона"}</p>
+                  <small className="muted">Получен: {fmtDate(l.createdAt)}</small>
                 </td>
                 <td>
                   {l.program || "Не указан"}
                   <p className="muted">{l.source}</p>
                 </td>
+                <td><span className={"badge " + (l.learningFormat === "ONLINE" ? "blue" : l.learningFormat === "OFFLINE" ? "green" : "")}>{learningFormatLabels[l.learningFormat]}</span></td>
                 <td>
                   <span className={"badge " + leadColors[l.status]}>
                     {leadLabels[l.status]}
@@ -247,6 +263,7 @@ export default async function LeadsPage({
           source: sp.source || "",
           due: sp.due || "",
           archived: archived ? "1" : "0",
+          learningFormat: learningFormat || "",
         }}
       />
     </>

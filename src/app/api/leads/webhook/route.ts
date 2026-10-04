@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendLeadEvent } from "@/lib/meta-events";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { LearningFormat } from "@prisma/client";
 
 function authorize(req: NextRequest) {
   const secret = process.env.WEBHOOK_SECRET;
@@ -71,6 +72,7 @@ export async function POST(req: NextRequest) {
     if (body.dryRun != null && typeof body.dryRun !== "boolean") {
       throw new Error("dryRun must be a boolean");
     }
+    if (body.learningFormat != null && !Object.values(LearningFormat).includes(body.learningFormat as LearningFormat)) throw new Error("Invalid learningFormat");
     data = {
       ...(body.metaLeadId
         ? { id: metaLeadKey(body.metaLeadId as string) }
@@ -85,6 +87,7 @@ export async function POST(req: NextRequest) {
         textField(body, ["source", "platform", "channel", "utm_source"], 100) ||
         "webhook",
       program: textField(body, ["program", "course", "interest", "tag"], 100),
+      learningFormat: (body.learningFormat || "UNKNOWN") as LearningFormat,
       note: textField(
         body,
         ["note", "message", "comment", "last_message"],
@@ -108,11 +111,14 @@ export async function POST(req: NextRequest) {
       typeof body.formId === "string"
         ? body.formId
         : data.note?.match(/Form ID:\s*(\d{5,50})/)?.[1];
-    if (!data.program && formId) {
+    if (formId) {
       const mapping = await prisma.leadForm.findUnique({
         where: { id: formId },
       });
-      if (mapping) data.program = mapping.program;
+      if (mapping) {
+        if (!data.program) data.program = mapping.program;
+        if (data.learningFormat === "UNKNOWN") data.learningFormat = mapping.learningFormat || "UNKNOWN";
+      }
     }
     const lead = await prisma.lead.create({ data });
 

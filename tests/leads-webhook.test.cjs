@@ -48,7 +48,7 @@ function harness(secret = "test-only-secret") {
             lead,
             leadForm: {
               findUnique: async ({ where }) =>
-                where.id === "1410025207940063" ? { program: "SAT" } : null,
+                where.id === "1410025207940063" ? { program: "SAT", learningFormat: "OFFLINE" } : null,
             },
           },
         };
@@ -195,4 +195,8 @@ test("known form IDs map to courses; explicit course is preserved", async () => 
     [...h.rows.values()].map((r) => r.program),
     ["SAT", "IELTS", null],
   );
+  assert.deepEqual([...h.rows.values()].map(r => r.learningFormat), ["OFFLINE", "OFFLINE", "UNKNOWN"]);
+  await h.POST(request({name: "Explicit online", formId: "1410025207940063", learningFormat: "ONLINE"}));
+  assert.equal([...h.rows.values()].at(-1).learningFormat, "ONLINE");
+  assert.equal((await h.POST(request({name: "Bad", learningFormat: "guess"}))).status, 400);
 });

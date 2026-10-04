@@ -2,7 +2,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { textField, parseLocalDate } from "@/lib/format";
-import { LeadStatus } from "@prisma/client";
+import { LeadStatus, LearningFormat } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
@@ -19,6 +19,8 @@ export async function saveLead(f: FormData) {
   const name = textField(f, "name");
   const status = textField(f, "status") || "NEW";
   const ownerId = textField(f, "ownerId");
+  const learningFormat = textField(f, "learningFormat") || "UNKNOWN";
+  if (!Object.values(LearningFormat).includes(learningFormat as LearningFormat)) throw new Error("Некорректный формат обучения");
   const lossReason = textField(f, "lossReason", 1000);
   if (!name) throw new Error("Укажите имя");
   if (!Object.values(LeadStatus).includes(status as LeadStatus))
@@ -47,6 +49,7 @@ export async function saveLead(f: FormData) {
       phone: textField(f, "phone", 50) || null,
       source: textField(f, "source", 100) || "manual",
       program: textField(f, "program", 100) || null,
+      learningFormat: f.has("learningFormat") ? learningFormat as LearningFormat : old?.learningFormat || "UNKNOWN",
       note: textField(f, "note", 5000) || null,
       status: status as LeadStatus,
       ownerId: ownerId || null,
@@ -161,13 +164,15 @@ export async function saveLeadForm(f: FormData) {
   const id = textField(f, "id", 50);
   const name = textField(f, "name", 100);
   const program = textField(f, "program", 100);
+  const learningFormat = textField(f, "learningFormat") || "UNKNOWN";
+  if (!Object.values(LearningFormat).includes(learningFormat as LearningFormat)) throw new Error("Некорректный формат обучения");
   if (!/^\d{5,50}$/.test(id) || !name || !program)
     throw new Error("Укажите ID формы, название и курс");
   await prisma.$transaction(async (tx) => {
     await tx.leadForm.upsert({
       where: { id },
-      create: { id, name, program },
-      update: { name, program },
+      create: { id, name, program, learningFormat: learningFormat as LearningFormat },
+      update: { name, program, ...(f.has("learningFormat") ? {learningFormat: learningFormat as LearningFormat} : {}) },
     });
     await tx.auditLog.create({
       data: {

@@ -7,6 +7,7 @@ import { deliverOne } from "@/lib/telegramDelivery";
 import { revalidatePath } from "next/cache";
 import Pagination from "@/components/Pagination";
 import Link from "next/link";
+import { learningFormatLabels } from "@/lib/lead-labels";
 async function retry(f: FormData) {
   "use server";
   const actor = await requireRole("ADMIN", "DIRECTOR");
@@ -136,6 +137,20 @@ export default async function Integrations({
         отправка новых сообщений проверяется ежедневно, 09:00–10:00 по
         Самарканду. Старые ошибки доступны для ручной проверки.
       </div>
+      <section className="panel" style={{ marginBottom: 24 }}>
+        <h2 className="panel-title">Заявки EIT Online · Google Sheets</h2>
+        <p>
+          {process.env.SHEETS_CRM_SECRET && process.env.EIT_LEADS_SPREADSHEET_ID
+            ? "Приём из таблицы настроен. Проверка новых строк запускается в Google Apps Script каждые 5 минут."
+            : "Приём из таблицы ещё не настроен."}
+        </p>
+        <p className="muted" style={{ marginTop: 12 }}>
+          Заявки лендинга и placement test находятся в разделе «Лиды» с источниками website и placement.
+          Исходные даты сохраняются. Тестовые строки пропускаются, повторная передача не меняет карточки.
+          Результат переноса и ошибки доступны в столбцах CRM исходной таблицы.
+        </p>
+        <Link href="/admin/leads?source=website" className="btn secondary" style={{ marginTop: 16 }}>Заявки сайта →</Link>
+      </section>
       {errors.length > 0 && (
         <section className="panel" style={{ marginBottom: 24 }}>
           <h2>Ошибки интеграций</h2>
@@ -242,7 +257,7 @@ export default async function Integrations({
             лиды без курса.
           </p>
           <div className="stack">
-            {[...forms, { id: "", name: "", program: "" }].map((f, i) => (
+            {[...forms, { id: "", name: "", program: "", learningFormat: "UNKNOWN" }].map((f, i) => (
               <ActionForm
                 key={f.id || i}
                 action={saveLeadForm}
@@ -264,6 +279,12 @@ export default async function Integrations({
                 <label className="field">
                   <span>Курс</span>
                   <input name="program" defaultValue={f.program} required />
+                </label>
+                <label className="field">
+                  <span>Формат обучения</span>
+                  <select name="learningFormat" defaultValue={f.learningFormat}>
+                    {Object.entries(learningFormatLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
                 </label>
                 <button className="btn secondary">
                   {f.id ? "Сохранить" : "Добавить форму"}

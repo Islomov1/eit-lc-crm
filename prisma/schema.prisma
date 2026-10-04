@@ -304,6 +304,7 @@ model LeadForm {
   id      String @id
   name    String
   program String
+  learningFormat LearningFormat @default(UNKNOWN)
 }
 
 model IntegrationError {
@@ -322,6 +323,7 @@ model Lead {
   phone      String?
   source     String?
   program    String?
+  learningFormat LearningFormat @default(UNKNOWN)
   ownerId    String?
   followUpAt DateTime?
   trialAt    DateTime?
@@ -354,6 +356,12 @@ model Expense {
 
   @@index([date])
   @@index([category])
+}
+
+enum LearningFormat {
+  ONLINE
+  OFFLINE
+  UNKNOWN
 }
 
 enum LeadStatus {

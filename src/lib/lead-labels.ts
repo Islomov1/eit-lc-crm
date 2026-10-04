@@ -12,3 +12,6 @@ export const leadColors: Record<string, string> = {
   CONVERTED: "green",
   LOST: "red",
 };
+export const learningFormatLabels = {
+  ONLINE: "Онлайн", OFFLINE: "Оффлайн", UNKNOWN: "Не указан",
+};
