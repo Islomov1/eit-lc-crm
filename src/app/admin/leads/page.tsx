@@ -94,7 +94,7 @@ export default async function LeadsPage({
           </Link>
         ))}
       </div>
-      <form className="filters">
+      <form className="filters" key={JSON.stringify([q, status, sp.ownerId, sp.source, sp.due, learningFormat, archived])}>
         <select name="learningFormat" defaultValue={learningFormat || ""} aria-label="Формат обучения">
           <option value="">Все форматы</option>
           {Object.entries(learningFormatLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
